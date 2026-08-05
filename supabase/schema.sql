@@ -669,25 +669,45 @@ drop type if exists public.user_role;
 -- -----------------------------------------------------------------------------
 -- Dades inicials (edita-les des de /admin quan vulguis)
 -- -----------------------------------------------------------------------------
+
+-- Llista de zones revisada. Elimina les que ja no s'usen (les fitxes que hi
+-- apuntaven queden sense zona, on delete set null); les que es mantenen amb
+-- el mateix nom (Habitació 1/2/3, Garatge, Safareig) només actualitzen l'ordre.
+delete from public.zones
+where name in (
+  'Exterior / Façana', 'Coberta', 'Jardí / Parcel·la', 'Planta baixa',
+  'Planta primera', 'Escala', 'Cuina', 'Menjador - Sala', 'Bany 1',
+  'Bany 2', 'Instal·lacions', 'Altres'
+);
+
 insert into public.zones (name, sort_order) values
-  ('Exterior / Façana',      10),
-  ('Coberta',                20),
-  ('Jardí / Parcel·la',      30),
-  ('Garatge',                40),
-  ('Planta baixa',           50),
-  ('Planta primera',         60),
-  ('Escala',                 70),
-  ('Cuina',                  80),
-  ('Menjador - Sala',        90),
-  ('Bany 1',                100),
-  ('Bany 2',                110),
-  ('Habitació 1',           120),
-  ('Habitació 2',           130),
-  ('Habitació 3',           140),
-  ('Safareig',              150),
-  ('Instal·lacions',        160),
-  ('Altres',                999)
-on conflict (name) do nothing;
+  ('Tanca',                 10),
+  ('Jardí',                 20),
+  ('Façana',                30),
+  ('Rebedor',               40),
+  ('Escales',               50),
+  ('Sala-Cuina-Menjador',   60),
+  ('Passadís PB',           70),
+  ('Bany cortesia',         80),
+  ('Bany PB',               90),
+  ('Bany suite',           100),
+  ('Bany comú',            110),
+  ('Habitació 1',          120),
+  ('Habitació 2',          130),
+  ('Habitació 3',          140),
+  ('Despatx 1',            150),
+  ('Despatx 2',            160),
+  ('Garatge',              170),
+  ('Traster',              180),
+  ('Traster P1',           190),
+  ('Safareig',             200),
+  ('Sala P1',              210),
+  ('Terrassa P1',          220),
+  ('Piscina',              230),
+  ('Terrassa jardí',       240),
+  ('Sala màquines',        250),
+  ('Passadís P1',          260)
+on conflict (name) do update set sort_order = excluded.sort_order;
 
 insert into public.work_types (name, sort_order) values
   ('Pintura',                        10),

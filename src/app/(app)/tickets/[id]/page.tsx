@@ -129,7 +129,7 @@ export default async function TicketDetailPage({
               ticketId={t.id}
               field="description"
               images={imagesFor('description')}
-              canEdit={canEdit}
+              canEdit={false}
             />
           </div>
           <div>
@@ -143,7 +143,7 @@ export default async function TicketDetailPage({
               ticketId={t.id}
               field="agreed_solution"
               images={imagesFor('agreed_solution')}
-              canEdit={canEdit}
+              canEdit={false}
             />
           </div>
         </dl>
@@ -201,6 +201,8 @@ export default async function TicketDetailPage({
               assignees={(profiles ?? []) as Profile[]}
               teams={teams}
               ticket={t}
+              descriptionImages={imagesFor('description')}
+              solutionImages={imagesFor('agreed_solution')}
             />
           </div>
         </details>

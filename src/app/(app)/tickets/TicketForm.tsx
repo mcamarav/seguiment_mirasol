@@ -4,7 +4,10 @@ import { useActionState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { createTicket, updateTicket, type FormState } from './actions'
 import { displayName } from '@/lib/format'
+import { FieldImages } from './[id]/FieldImages'
 import type { Profile, Team, Ticket, WorkType, Zone } from '@/lib/types'
+
+type ImageRef = { id: string; url: string }
 
 function Submit({ label }: { label: string }) {
   const { pending } = useFormStatus()
@@ -21,12 +24,16 @@ export function TicketForm({
   assignees,
   teams,
   ticket,
+  descriptionImages = [],
+  solutionImages = [],
 }: {
   zones: Zone[]
   workTypes: WorkType[]
   assignees: Profile[]
   teams: Team[]
   ticket?: Ticket
+  descriptionImages?: ImageRef[]
+  solutionImages?: ImageRef[]
 }) {
   const isEdit = Boolean(ticket)
   const [state, formAction] = useActionState<FormState, FormData>(
@@ -157,6 +164,14 @@ export function TicketForm({
           defaultValue={ticket?.description ?? ''}
           placeholder="Què passa, on exactament, des de quan…"
         />
+        {isEdit && (
+          <FieldImages
+            ticketId={ticket!.id}
+            field="description"
+            images={descriptionImages}
+            canEdit
+          />
+        )}
       </div>
 
       <div>
@@ -171,6 +186,14 @@ export function TicketForm({
           defaultValue={ticket?.agreed_solution ?? ''}
           placeholder="Descriu què es farà per resoldre-ho."
         />
+        {isEdit && (
+          <FieldImages
+            ticketId={ticket!.id}
+            field="agreed_solution"
+            images={solutionImages}
+            canEdit
+          />
+        )}
         <p className="mt-1.5 text-xs text-[var(--color-muted)]">
           Quan hi escrius alguna cosa, la fitxa passa a l’estat{' '}
           <strong>Solució proposada</strong> i cal que la tornin a aprovar el
