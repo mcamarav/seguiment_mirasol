@@ -7,6 +7,7 @@ import { CatalogEditor } from './CatalogEditor'
 import { InvitationsPanel } from './InvitationsPanel'
 import { TeamsEditor } from './TeamsEditor'
 import { setUserCapabilities } from './actions'
+import { SubmitButton } from '@/components/SubmitButton'
 import type { Invitation, Profile, WorkType, Zone } from '@/lib/types'
 
 export default async function AdminPage() {
@@ -72,9 +73,9 @@ export default async function AdminPage() {
                   <input type="checkbox" name="can_edit_all" defaultChecked={p.can_edit_all} />
                   Editar totes
                 </label>
-                <button type="submit" className="btn btn-secondary">
+                <SubmitButton className="btn btn-secondary" pendingLabel="…">
                   Aplicar
-                </button>
+                </SubmitButton>
               </form>
             </li>
           ))}

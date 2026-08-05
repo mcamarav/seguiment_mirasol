@@ -6,6 +6,7 @@ import {
   setTeamGlobalRole,
   toggleTeamMembership,
 } from './actions'
+import { SubmitButton } from '@/components/SubmitButton'
 import type { Profile, TeamWithMembers } from '@/lib/types'
 
 const GLOBAL_ROLE_LABELS = {
@@ -32,9 +33,9 @@ export function TeamsEditor({
 
       <form action={createTeam} className="mt-3 flex gap-2">
         <input name="name" required className="field" placeholder="Nom de l’equip nou…" />
-        <button type="submit" className="btn btn-secondary shrink-0">
+        <SubmitButton className="btn btn-secondary shrink-0" pendingLabel="Creant…">
           Crear equip
-        </button>
+        </SubmitButton>
       </form>
 
       <ul className="mt-4 space-y-4">
@@ -44,15 +45,21 @@ export function TeamsEditor({
               <form action={renameTeam} className="flex min-w-0 flex-1 gap-2">
                 <input type="hidden" name="id" value={team.id} />
                 <input name="name" defaultValue={team.name} className="field" />
-                <button type="submit" className="shrink-0 text-xs font-semibold text-[var(--color-brand)]">
+                <SubmitButton
+                  className="shrink-0 text-xs font-semibold text-[var(--color-brand)]"
+                  pendingLabel="…"
+                >
                   Desar
-                </button>
+                </SubmitButton>
               </form>
               <form action={deleteTeam} className="shrink-0">
                 <input type="hidden" name="id" value={team.id} />
-                <button type="submit" className="text-xs font-semibold text-[var(--color-muted)] hover:text-red-700">
+                <SubmitButton
+                  className="text-xs font-semibold text-[var(--color-muted)] hover:text-red-700"
+                  pendingLabel="…"
+                >
                   Esborrar equip
-                </button>
+                </SubmitButton>
               </form>
             </div>
 
@@ -68,9 +75,9 @@ export function TeamsEditor({
                 <option value="tecnics">Rol global: Tècnics</option>
                 <option value="propietaris">Rol global: Propietaris</option>
               </select>
-              <button type="submit" className="btn btn-secondary shrink-0">
+              <SubmitButton className="btn btn-secondary shrink-0" pendingLabel="…">
                 Aplicar
-              </button>
+              </SubmitButton>
               {team.global_role && (
                 <span className="text-xs text-[var(--color-muted)]">
                   Aprova {GLOBAL_ROLE_LABELS[team.global_role]} a totes les fitxes
@@ -88,16 +95,16 @@ export function TeamsEditor({
                       <input type="hidden" name="team_id" value={team.id} />
                       <input type="hidden" name="user_id" value={p.id} />
                       <input type="hidden" name="is_member" value={String(isMember)} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
                           isMember
                             ? 'border-[var(--color-brand)] bg-[var(--color-brand-soft)] text-[var(--color-brand)]'
                             : 'border-[var(--color-line)] text-[var(--color-muted)]'
                         }`}
+                        pendingLabel="…"
                       >
                         {displayName(p)}
-                      </button>
+                      </SubmitButton>
                     </form>
                   </li>
                 )

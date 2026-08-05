@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { shrinkImage } from '@/lib/image'
 import { createComment } from '../actions'
+import { useGlobalPending } from '@/components/PendingOverlay'
 
 const MAX_FILES = 6
 
@@ -16,6 +17,7 @@ export function CommentForm({ ticketId }: { ticketId: number }) {
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  useGlobalPending(busy)
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()

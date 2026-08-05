@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { setApproval } from '../actions'
 import { ACTORS, ACTOR_LABELS } from '@/lib/permissions'
 import { formatDateTime } from '@/lib/format'
+import { useGlobalPending } from '@/components/PendingOverlay'
 import type { Actor } from '@/lib/types'
 
 export function ApprovalPanel({
@@ -22,6 +23,7 @@ export function ApprovalPanel({
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<Actor | null>(null)
+  useGlobalPending(pending)
 
   function toggle(actor: Actor, approve: boolean) {
     setError(null)

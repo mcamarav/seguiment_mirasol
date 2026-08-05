@@ -1,9 +1,10 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getCurrentProfile } from '@/lib/supabase/server'
 import { isAdmin } from '@/lib/permissions'
 import { displayName } from '@/lib/format'
 import { signOut } from '../auth-actions'
+import { SubmitButton } from '@/components/SubmitButton'
+import Link from 'next/link'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await getCurrentProfile()
@@ -29,9 +30,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           )}
 
           <form action={signOut}>
-            <button type="submit" className="text-sm font-semibold text-[var(--color-muted)]">
+            <SubmitButton
+              className="text-sm font-semibold text-[var(--color-muted)]"
+              pendingLabel="Sortint…"
+            >
               Sortir
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </header>

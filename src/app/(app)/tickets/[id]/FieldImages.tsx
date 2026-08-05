@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { shrinkImage } from '@/lib/image'
 import { addFieldImages, deleteFieldImage } from '../actions'
+import { useGlobalPending } from '@/components/PendingOverlay'
+import { SubmitButton } from '@/components/SubmitButton'
 import type { TicketImageField } from '@/lib/types'
 
 const MAX_FILES = 6
@@ -25,6 +27,7 @@ export function FieldImages({
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  useGlobalPending(busy)
 
   async function handleFiles(fileList: FileList | null) {
     const files = Array.from(fileList ?? []).slice(0, MAX_FILES)
@@ -83,13 +86,12 @@ export function FieldImages({
                 <form action={deleteFieldImage}>
                   <input type="hidden" name="image_id" value={img.id} />
                   <input type="hidden" name="ticket_id" value={ticketId} />
-                  <button
-                    type="submit"
+                  <SubmitButton
                     aria-label="Esborrar imatge"
                     className="absolute top-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white opacity-0 group-hover:opacity-100"
                   >
                     ×
-                  </button>
+                  </SubmitButton>
                 </form>
               )}
             </li>

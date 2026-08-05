@@ -1,5 +1,5 @@
-import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import Link from 'next/link'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
 import { approvalsFor, canCommentTicket, canEditTicket, isAdmin } from '@/lib/permissions'
 import { buildTeamContext, toTeamsWithMembers } from '@/lib/teams'
@@ -10,6 +10,7 @@ import { ApprovalPanel } from './ApprovalPanel'
 import { CommentForm } from './CommentForm'
 import { FieldImages } from './FieldImages'
 import { deleteComment, deleteTicket } from '../actions'
+import { SubmitButton } from '@/components/SubmitButton'
 import type { Comment, Profile, Ticket, TicketFieldImage, WorkType, Zone } from '@/lib/types'
 
 const SIGNED_URL_TTL = 60 * 60 // 1 hora
@@ -237,12 +238,12 @@ export default async function TicketDetailPage({
                     <form action={deleteComment} className="ml-auto">
                       <input type="hidden" name="comment_id" value={c.id} />
                       <input type="hidden" name="ticket_id" value={t.id} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className="text-xs font-semibold text-[var(--color-muted)] hover:text-red-700"
+                        pendingLabel="…"
                       >
                         Esborrar
-                      </button>
+                      </SubmitButton>
                     </form>
                   )}
                 </div>
@@ -287,9 +288,9 @@ export default async function TicketDetailPage({
       {isAdmin(profile) && (
         <form action={deleteTicket} className="pt-4 text-right">
           <input type="hidden" name="id" value={t.id} />
-          <button type="submit" className="text-sm font-semibold text-red-700">
+          <SubmitButton className="text-sm font-semibold text-red-700" pendingLabel="Esborrant…">
             Esborrar aquesta fitxa
-          </button>
+          </SubmitButton>
         </form>
       )}
     </div>

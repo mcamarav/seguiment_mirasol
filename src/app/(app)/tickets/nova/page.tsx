@@ -1,5 +1,5 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
 import { canCreateTickets } from '@/lib/permissions'
 import { toTeamsWithMembers } from '@/lib/teams'

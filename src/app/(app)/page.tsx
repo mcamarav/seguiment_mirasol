@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Form from 'next/form'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
 import { canCreateTickets, STATUS_LABELS } from '@/lib/permissions'
 import { toTeamsWithMembers } from '@/lib/teams'
@@ -127,7 +128,7 @@ export default async function TicketsPage({
         ))}
       </nav>
 
-      <form method="get" className="card grid grid-cols-2 gap-2 p-3 sm:grid-cols-4">
+      <Form action="/" className="card grid grid-cols-2 gap-2 p-3 sm:grid-cols-4">
         <input type="hidden" name="estat" value={tab} />
         <select name="zona" defaultValue={zona} className="field truncate" aria-label="Zona">
           <option value="">Totes les zones</option>
@@ -191,7 +192,7 @@ export default async function TicketsPage({
         <button type="submit" className="btn btn-secondary">
           Filtrar
         </button>
-      </form>
+      </Form>
 
       {error && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

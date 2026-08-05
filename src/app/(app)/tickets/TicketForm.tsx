@@ -1,22 +1,13 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
 import { createTicket, updateTicket, type FormState } from './actions'
 import { displayName } from '@/lib/format'
 import { FieldImages } from './[id]/FieldImages'
+import { SubmitButton } from '@/components/SubmitButton'
 import type { Profile, Team, Ticket, WorkType, Zone } from '@/lib/types'
 
 type ImageRef = { id: string; url: string }
-
-function Submit({ label }: { label: string }) {
-  const { pending } = useFormStatus()
-  return (
-    <button type="submit" className="btn btn-primary" disabled={pending}>
-      {pending ? 'Desant…' : label}
-    </button>
-  )
-}
 
 export function TicketForm({
   zones,
@@ -216,7 +207,9 @@ export function TicketForm({
       )}
 
       <div className="flex justify-end">
-        <Submit label={isEdit ? 'Desar canvis' : 'Crear la fitxa'} />
+        <SubmitButton pendingLabel={isEdit ? 'Desant…' : 'Creant…'}>
+          {isEdit ? 'Desar canvis' : 'Crear la fitxa'}
+        </SubmitButton>
       </div>
     </form>
   )

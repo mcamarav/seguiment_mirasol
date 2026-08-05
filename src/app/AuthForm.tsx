@@ -1,18 +1,9 @@
 'use client'
 
 import { useActionState } from 'react'
-import { useFormStatus } from 'react-dom'
-import Link from 'next/link'
 import { signIn, signUp, type AuthState } from './auth-actions'
-
-function Submit({ label }: { label: string }) {
-  const { pending } = useFormStatus()
-  return (
-    <button type="submit" className="btn btn-primary w-full" disabled={pending}>
-      {pending ? 'Un moment…' : label}
-    </button>
-  )
-}
+import { SubmitButton } from '@/components/SubmitButton'
+import Link from 'next/link'
 
 export function AuthForm({ mode }: { mode: 'entrar' | 'registre' }) {
   const action = mode === 'entrar' ? signIn : signUp
@@ -74,7 +65,9 @@ export function AuthForm({ mode }: { mode: 'entrar' | 'registre' }) {
         </p>
       )}
 
-      <Submit label={mode === 'entrar' ? 'Entrar' : 'Crear el compte'} />
+      <SubmitButton className="btn btn-primary w-full" pendingLabel="Un moment…">
+        {mode === 'entrar' ? 'Entrar' : 'Crear el compte'}
+      </SubmitButton>
 
       <p className="text-center text-sm text-[var(--color-muted)]">
         {mode === 'entrar' ? (

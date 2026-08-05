@@ -1,5 +1,6 @@
 import { formatDate } from '@/lib/format'
 import { inviteEmail, revokeInvitation } from './actions'
+import { SubmitButton } from '@/components/SubmitButton'
 import type { Invitation } from '@/lib/types'
 
 export function InvitationsPanel({ invitations }: { invitations: Invitation[] }) {
@@ -28,9 +29,9 @@ export function InvitationsPanel({ invitations }: { invitations: Invitation[] })
           <input type="checkbox" name="is_admin" />
           Administrador
         </label>
-        <button type="submit" className="btn btn-primary shrink-0">
+        <SubmitButton className="btn btn-primary shrink-0" pendingLabel="Convidant…">
           Convidar
-        </button>
+        </SubmitButton>
         <input
           name="note"
           className="field sm:col-span-3"
@@ -55,12 +56,12 @@ export function InvitationsPanel({ invitations }: { invitations: Invitation[] })
               </div>
               <form action={revokeInvitation} className="shrink-0">
                 <input type="hidden" name="email" value={inv.email} />
-                <button
-                  type="submit"
+                <SubmitButton
                   className="text-xs font-semibold text-[var(--color-muted)] hover:text-red-700"
+                  pendingLabel="…"
                 >
                   Retirar
-                </button>
+                </SubmitButton>
               </form>
             </li>
           ))}

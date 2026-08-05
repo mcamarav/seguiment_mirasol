@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import { PendingProvider } from '@/components/PendingOverlay'
+import { NavigationPendingListener } from '@/components/NavigationPendingListener'
 
 export const metadata: Metadata = {
   title: 'Seguiment Mirasol',
@@ -14,7 +16,12 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ca">
-      <body>{children}</body>
+      <body>
+        <PendingProvider>
+          <NavigationPendingListener />
+          <div id="app-content">{children}</div>
+        </PendingProvider>
+      </body>
     </html>
   )
 }
