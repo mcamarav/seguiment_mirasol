@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
 import { isAdmin } from '@/lib/permissions'
-import { toTeamsWithMembers } from '@/lib/teams'
+import { toInvitationTeamsMap, toTeamsWithMembers } from '@/lib/teams'
 import { displayName, formatDate } from '@/lib/format'
 import { CatalogEditor } from './CatalogEditor'
 import { InvitationsPanel } from './InvitationsPanel'
@@ -25,23 +25,35 @@ export default async function AdminPage() {
   }
 
   const supabase = await createClient()
-  const [{ data: profiles }, { data: invitations }, { data: zones }, { data: workTypes }, { data: teamRows }] =
-    await Promise.all([
-      supabase.from('profiles').select('*').order('created_at'),
-      supabase.from('invitations').select('*').order('created_at'),
-      supabase.from('zones').select('*').order('sort_order'),
-      supabase.from('work_types').select('*').order('sort_order'),
-      supabase.from('teams').select('id, name, global_role, created_at, team_members(user_id)').order('created_at'),
-    ])
+  const [
+    { data: profiles },
+    { data: invitations },
+    { data: invitationTeamRows },
+    { data: zones },
+    { data: workTypes },
+    { data: teamRows },
+  ] = await Promise.all([
+    supabase.from('profiles').select('*').order('created_at'),
+    supabase.from('invitations').select('*').order('created_at'),
+    supabase.from('invitation_teams').select('email, team_id'),
+    supabase.from('zones').select('*').order('sort_order'),
+    supabase.from('work_types').select('*').order('sort_order'),
+    supabase.from('teams').select('id, name, global_role, created_at, team_members(user_id)').order('created_at'),
+  ])
 
   const allProfiles = (profiles ?? []) as Profile[]
   const teams = toTeamsWithMembers(teamRows ?? [])
+  const invitationTeams = toInvitationTeamsMap(invitationTeamRows ?? [])
 
   return (
     <div className="space-y-5">
       <h1 className="text-xl font-bold tracking-tight">Administració</h1>
 
-      <InvitationsPanel invitations={(invitations ?? []) as Invitation[]} />
+      <InvitationsPanel
+        invitations={(invitations ?? []) as Invitation[]}
+        teams={teams}
+        invitationTeams={invitationTeams}
+      />
 
       <section className="card p-4">
         <h2 className="font-semibold">Usuaris i permisos</h2>

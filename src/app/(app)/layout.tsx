@@ -23,6 +23,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </span>
           </Link>
 
+          <Link href="/perfil" className="text-sm font-semibold text-[var(--color-muted)]">
+            Perfil
+          </Link>
+
           {isAdmin(profile) && (
             <Link href="/admin" className="text-sm font-semibold text-[var(--color-brand)]">
               Admin

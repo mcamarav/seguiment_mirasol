@@ -31,6 +31,17 @@ export function isInGlobalTeam(ctx: TeamContext, globalRole: 'tecnics' | 'propie
   return team != null && ctx.myTeamIds.has(team.id)
 }
 
+/** Equips pre-assignats a cada invitació pendent, agrupats per correu. */
+export function toInvitationTeamsMap(rows: { email: string; team_id: number }[]): Map<string, number[]> {
+  const map = new Map<string, number[]>()
+  for (const r of rows) {
+    const list = map.get(r.email)
+    if (list) list.push(r.team_id)
+    else map.set(r.email, [r.team_id])
+  }
+  return map
+}
+
 /** Shape que retorna `select('id, name, global_role, created_at, team_members(user_id)')`. */
 export function toTeamsWithMembers(
   rows: { id: number; name: string; global_role: string | null; created_at: string; team_members: { user_id: string }[] }[],

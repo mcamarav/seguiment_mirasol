@@ -54,6 +54,14 @@ export function AuthForm({ mode }: { mode: 'entrar' | 'registre' }) {
           autoComplete={mode === 'entrar' ? 'current-password' : 'new-password'}
           minLength={mode === 'registre' ? 8 : undefined}
         />
+        {mode === 'entrar' && (
+          <Link
+            href="/recuperar"
+            className="mt-1.5 inline-block text-xs font-semibold text-[var(--color-brand)]"
+          >
+            Has oblidat la contrasenya?
+          </Link>
+        )}
       </div>
 
       {state.error && (

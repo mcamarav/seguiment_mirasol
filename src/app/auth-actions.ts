@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 
 export interface AuthState {
@@ -83,6 +84,30 @@ export async function signUp(_prev: AuthState, formData: FormData): Promise<Auth
 
   revalidatePath('/', 'layout')
   redirect('/')
+}
+
+async function origin(): Promise<string> {
+  const h = await headers()
+  const host = h.get('x-forwarded-host') ?? h.get('host')
+  const proto = h.get('x-forwarded-proto') ?? (host?.startsWith('localhost') ? 'http' : 'https')
+  return `${proto}://${host}`
+}
+
+/** Envia un correu amb un enllaç per restablir la contrasenya. Sempre retorna
+ * el mateix avís (encara que el correu no tingui compte), per no revelar
+ * quins correus estan registrats. */
+export async function requestPasswordReset(_prev: AuthState, formData: FormData): Promise<AuthState> {
+  const email = String(formData.get('email') ?? '').trim()
+  if (!email) return { error: 'Cal el correu.' }
+
+  const supabase = await createClient()
+  await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${await origin()}/auth/confirm?next=/perfil`,
+  })
+
+  return {
+    notice: 'Si el correu té un compte, rebràs un enllaç per restablir la contrasenya.',
+  }
 }
 
 export async function signOut() {

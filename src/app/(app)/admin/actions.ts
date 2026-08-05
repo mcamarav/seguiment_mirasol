@@ -40,7 +40,8 @@ export async function setUserCapabilities(formData: FormData): Promise<void> {
   revalidatePath('/', 'layout')
 }
 
-/** Autoritza un correu a registrar-se. Els equips i permisos es donen després, des d'aquí. */
+/** Autoritza un correu a registrar-se, amb els equips (opcionals) que se li
+ * donaran automàticament quan es registri. */
 export async function inviteEmail(formData: FormData): Promise<void> {
   const admin = await requireAdmin()
 
@@ -49,6 +50,10 @@ export async function inviteEmail(formData: FormData): Promise<void> {
     .toLowerCase()
   const note = String(formData.get('note') ?? '').trim() || null
   const is_admin = formData.get('is_admin') === 'on'
+  const teamIds = formData
+    .getAll('team_ids')
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n) && n > 0)
 
   if (!email || !email.includes('@')) return
 
@@ -56,6 +61,30 @@ export async function inviteEmail(formData: FormData): Promise<void> {
   await supabase
     .from('invitations')
     .upsert({ email, is_admin, note, invited_by: admin.id }, { onConflict: 'email' })
+
+  await supabase.from('invitation_teams').delete().eq('email', email)
+  if (teamIds.length > 0) {
+    await supabase.from('invitation_teams').insert(teamIds.map((team_id) => ({ email, team_id })))
+  }
+
+  revalidatePath('/admin')
+}
+
+/** Edita els equips pre-assignats a una invitació encara pendent. */
+export async function toggleInvitationTeam(formData: FormData): Promise<void> {
+  await requireAdmin()
+
+  const email = String(formData.get('email') ?? '').trim().toLowerCase()
+  const teamId = Number(formData.get('team_id'))
+  const isMember = String(formData.get('is_member')) === 'true'
+  if (!email || !teamId) return
+
+  const supabase = await createClient()
+  if (isMember) {
+    await supabase.from('invitation_teams').delete().eq('email', email).eq('team_id', teamId)
+  } else {
+    await supabase.from('invitation_teams').upsert({ email, team_id: teamId })
+  }
 
   revalidatePath('/admin')
 }

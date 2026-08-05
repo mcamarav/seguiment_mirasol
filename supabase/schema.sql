@@ -126,6 +126,15 @@ end $$;
 -- L'antic tipus de rol únic (i les funcions que el feien servir) es netegen
 -- al final d'aquest fitxer, un cop cap policy ni trigger ja no els referencia.
 
+-- Equips que se li donaran automàticament quan la invitació s'accepti. Es pot
+-- editar mentre estigui pendent; un cop acceptada, handle_new_user() converteix
+-- aquestes files en team_members i les esborra.
+create table if not exists public.invitation_teams (
+  email   text   not null references public.invitations(email) on delete cascade,
+  team_id bigint not null references public.teams(id) on delete cascade,
+  primary key (email, team_id)
+);
+
 -- Els correus es guarden sempre normalitzats, per evitar duplicats per majúscules.
 create or replace function public.normalize_invitation_email()
 returns trigger language plpgsql as $$
@@ -191,6 +200,15 @@ begin
   update public.invitations
      set accepted_at = now(), accepted_by = new.id
    where email = inv.email;
+
+  -- Equips pre-assignats a la invitació: es donen ara i ja no calen més.
+  insert into public.team_members (team_id, user_id)
+  select it.team_id, new.id
+    from public.invitation_teams it
+   where it.email = inv.email
+  on conflict do nothing;
+
+  delete from public.invitation_teams where email = inv.email;
 
   return new;
 end $$;
@@ -477,6 +495,7 @@ create index if not exists ticket_field_images_idx on public.ticket_field_images
 -- -----------------------------------------------------------------------------
 alter table public.profiles            enable row level security;
 alter table public.invitations         enable row level security;
+alter table public.invitation_teams    enable row level security;
 alter table public.teams               enable row level security;
 alter table public.team_members        enable row level security;
 alter table public.zones               enable row level security;
@@ -500,6 +519,10 @@ create policy profiles_update_admin on public.profiles
 -- no llegeix la taula: passa per la funció email_is_invited().
 drop policy if exists invitations_admin on public.invitations;
 create policy invitations_admin on public.invitations
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+drop policy if exists invitation_teams_admin on public.invitation_teams;
+create policy invitation_teams_admin on public.invitation_teams
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- Tothom veu els equips (calen per triar assignacions i filtres); només un

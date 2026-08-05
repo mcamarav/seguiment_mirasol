@@ -1,7 +1,11 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = ['/entrar', '/registre']
+// Accessibles sense sessió. `/auth` (l'intercanvi de codi dels enllaços de
+// correu) no és a AUTH_ONLY_PATHS: encara que ja hi hagi sessió, ha de poder
+// continuar el seu propi redirect en lloc que el middleware el talli abans.
+const AUTH_ONLY_PATHS = ['/entrar', '/registre', '/recuperar']
+const PUBLIC_PATHS = [...AUTH_ONLY_PATHS, '/auth']
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -42,7 +46,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (user && isPublic) {
+  const isAuthOnly = AUTH_ONLY_PATHS.some((p) => path === p || path.startsWith(`${p}/`))
+  if (user && isAuthOnly) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     url.search = ''
