@@ -119,3 +119,34 @@ select:focus-visible {
   outline: 2px solid var(--color-brand);
   outline-offset: 1px;
 }
+
+/* Vista d'impressió (/tickets/imprimir → "Desa com a PDF" del navegador).
+   `.no-print` marca el que només té sentit a pantalla; `.print-ticket` evita
+   que una fitxa quedi partida entre dues pàgines. */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff;
+    /* Sense això els navegadors no imprimeixen el color de les etiquetes d'estat. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-ticket {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+}

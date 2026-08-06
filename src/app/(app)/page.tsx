@@ -5,83 +5,30 @@ import { canCreateTickets, STATUS_LABELS } from '@/lib/permissions'
 import { toTeamsWithMembers } from '@/lib/teams'
 import { displayName } from '@/lib/format'
 import { TicketList } from './TicketList'
+import {
+  buildHref,
+  hrefFor,
+  parseTicketFilters,
+  SORT_OPTIONS,
+  TABS,
+  ticketListQuery,
+} from './ticket-filters'
 import type { Profile, TicketListRow, Zone } from '@/lib/types'
-
-type Tab = 'pendents' | 'resolts' | 'tots'
-
-const TABS: { key: Tab; label: string }[] = [
-  { key: 'pendents', label: 'Pendents' },
-  { key: 'resolts', label: 'Resolts' },
-  { key: 'tots', label: 'Tots' },
-]
-
-type SortKey =
-  | 'updated_desc'
-  | 'created_desc'
-  | 'created_asc'
-  | 'due_asc'
-  | 'due_desc'
-  | 'resolved_desc'
-  | 'title_asc'
-
-const SORT_OPTIONS: { key: SortKey; label: string; column: string; ascending: boolean }[] = [
-  { key: 'updated_desc', label: 'Modificació ↓', column: 'updated_at', ascending: false },
-  { key: 'created_desc', label: 'Publicació ↓', column: 'created_at', ascending: false },
-  { key: 'created_asc', label: 'Publicació ↑', column: 'created_at', ascending: true },
-  { key: 'due_asc', label: 'Data prevista ↑', column: 'due_date', ascending: true },
-  { key: 'due_desc', label: 'Data prevista ↓', column: 'due_date', ascending: false },
-  { key: 'resolved_desc', label: 'Resolució ↓', column: 'resolved_at', ascending: false },
-  { key: 'title_asc', label: 'Nom (A-Z)', column: 'title', ascending: true },
-]
-
-function buildHref(params: Record<string, string | undefined>) {
-  const search = new URLSearchParams()
-  for (const [k, v] of Object.entries(params)) if (v) search.set(k, v)
-  const qs = search.toString()
-  return qs ? `/?${qs}` : '/'
-}
 
 export default async function TicketsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const sp = await searchParams
-  const one = (k: string) => (Array.isArray(sp[k]) ? sp[k]![0] : (sp[k] as string | undefined))
-
-  const tab: Tab = (['pendents', 'resolts', 'tots'] as Tab[]).includes(one('estat') as Tab)
-    ? (one('estat') as Tab)
-    : 'pendents'
-  const zona = one('zona') ?? ''
-  const tipus = one('tipus') ?? ''
-  const assignat = one('assignat') ?? ''
-  const q = (one('q') ?? '').trim()
-  const ordre = (SORT_OPTIONS.find((s) => s.key === one('ordre'))?.key ?? 'updated_desc') as SortKey
-  const sortOption = SORT_OPTIONS.find((s) => s.key === ordre)!
+  const filters = parseTicketFilters(await searchParams)
+  const { tab, zona, tipus, assignat, q, ordre } = filters
 
   const profile = await getCurrentProfile()
   const supabase = await createClient()
 
-  let query = supabase
-    .from('ticket_list')
-    .select('*')
-    .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false })
-
-  if (tab === 'pendents') query = query.in('status', ['obert', 'solucio_acordada'])
-  if (tab === 'resolts') query = query.eq('status', 'resolt')
-  if (zona) query = query.eq('zone_id', Number(zona))
-  if (tipus) query = query.eq('work_type_id', Number(tipus))
-  if (assignat.startsWith('user:')) query = query.eq('assignee_id', assignat.slice(5))
-  if (assignat.startsWith('team:')) query = query.eq('assignee_team_id', Number(assignat.slice(5)))
-  if (q) {
-    // PostgREST separa els filtres d'`or` per comes i parèntesis: cal netejar-los.
-    const safe = q.replace(/[,()%*\\]/g, ' ').trim()
-    if (safe) query = query.or(`title.ilike.%${safe}%,description.ilike.%${safe}%`)
-  }
-
   const [{ data: tickets, error }, { data: zones }, { data: workTypes }, { data: profiles }, { data: teamRows }] =
     await Promise.all([
-      query,
+      ticketListQuery(supabase, filters),
       supabase.from('zones').select('*').order('sort_order'),
       supabase.from('work_types').select('*').order('sort_order'),
       supabase.from('profiles').select('id, email, full_name, is_admin, can_create, can_edit_all, created_at'),
@@ -99,6 +46,14 @@ export default async function TicketsPage({
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <h1 className="mr-auto text-xl font-bold tracking-tight">Fitxes</h1>
+        {rows.length > 0 && (
+          <Link
+            href={hrefFor(filters, '/tickets/imprimir')}
+            className="text-sm font-semibold text-[var(--color-muted)]"
+          >
+            Exportar PDF
+          </Link>
+        )}
         {profile && canCreateTickets(profile) && (
           <Link href="/tickets/nova" className="btn btn-primary">
             + Nova fitxa
