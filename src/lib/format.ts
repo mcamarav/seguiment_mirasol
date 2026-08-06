@@ -22,6 +22,16 @@ export function formatDate(iso: string | null): string {
   return dateOnly.format(new Date(iso))
 }
 
+/** Com formatDate però sense el "del" davant de l'any: "07 d’ag. 2026".
+ * Es fa servir a la llista, on cada columna té l'amplada justa. */
+export function formatDateShort(iso: string | null): string {
+  if (!iso) return '—'
+  const parts = dateOnly.formatToParts(new Date(iso))
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? ''
+  return `${value('day')} ${value('month')} ${value('year')}`
+}
+
 /** Referència humana de la fitxa: #007 */
 export function ticketRef(id: number): string {
   return `#${String(id).padStart(3, '0')}`

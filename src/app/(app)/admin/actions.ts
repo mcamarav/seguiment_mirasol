@@ -40,6 +40,27 @@ export async function setUserCapabilities(formData: FormData): Promise<void> {
   revalidatePath('/', 'layout')
 }
 
+/** Substitueix tots els equips d'un usuari pels seleccionats al multiselect. */
+export async function setUserTeams(formData: FormData): Promise<void> {
+  await requireAdmin()
+
+  const userId = String(formData.get('user_id') ?? '')
+  if (!userId) return
+  const teamIds = formData
+    .getAll('team_ids')
+    .map((v) => Number(v))
+    .filter((n) => Number.isFinite(n) && n > 0)
+
+  const supabase = await createClient()
+  await supabase.from('team_members').delete().eq('user_id', userId)
+  if (teamIds.length > 0) {
+    await supabase.from('team_members').insert(teamIds.map((team_id) => ({ team_id, user_id: userId })))
+  }
+
+  revalidatePath('/admin')
+  revalidatePath('/', 'layout')
+}
+
 /** Autoritza un correu a registrar-se, amb els equips (opcionals) que se li
  * donaran automàticament quan es registri. */
 export async function inviteEmail(formData: FormData): Promise<void> {

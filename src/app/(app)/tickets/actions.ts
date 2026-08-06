@@ -68,24 +68,34 @@ export async function createTicket(_prev: FormState, formData: FormData): Promis
   if (!title) return { error: 'El nom curt és obligatori.' }
 
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('tickets')
-    .insert({
-      title,
-      description: optional(formData, 'description'),
-      zone_id: optionalId(formData, 'zone_id'),
-      work_type_id: optionalId(formData, 'work_type_id'),
-      agreed_solution: optional(formData, 'agreed_solution'),
-      due_date: optional(formData, 'due_date'),
-      ...parseAssignee(formData),
-    })
-    .select('id')
-    .single()
+
+  // Sense `.select()`: això el convertiria en un INSERT ... RETURNING, i el
+  // RETURNING ha de passar la policy de lectura (can_comment_ticket). Aquestes
+  // funcions són STABLE, així que consulten la taula amb el snapshot d'abans de
+  // la inserció i no veuen la fila nova: no poden comprovar created_by =
+  // auth.uid() i Postgres avorta amb un error d'RLS. L'id es busca a part.
+  const { error } = await supabase.from('tickets').insert({
+    title,
+    description: optional(formData, 'description'),
+    zone_id: optionalId(formData, 'zone_id'),
+    work_type_id: optionalId(formData, 'work_type_id'),
+    agreed_solution: optional(formData, 'agreed_solution'),
+    due_date: optional(formData, 'due_date'),
+    ...parseAssignee(formData),
+  })
 
   if (error) return { error: error.message }
 
+  const { data } = await supabase
+    .from('tickets')
+    .select('id')
+    .eq('created_by', profile.id)
+    .order('id', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
   revalidatePath('/')
-  redirect(`/tickets/${data.id}`)
+  redirect(data ? `/tickets/${data.id}` : '/')
 }
 
 export async function updateTicket(_prev: FormState, formData: FormData): Promise<FormState> {

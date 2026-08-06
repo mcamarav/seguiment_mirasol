@@ -3,9 +3,8 @@ import Form from 'next/form'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
 import { canCreateTickets, STATUS_LABELS } from '@/lib/permissions'
 import { toTeamsWithMembers } from '@/lib/teams'
-import { displayName, formatDate, ticketRef, truncate } from '@/lib/format'
-import { StatusBadge } from '@/components/StatusBadge'
-import { ApprovalPips } from '@/components/ApprovalPips'
+import { displayName } from '@/lib/format'
+import { TicketList } from './TicketList'
 import type { Profile, TicketListRow, Zone } from '@/lib/types'
 
 type Tab = 'pendents' | 'resolts' | 'tots'
@@ -40,11 +39,6 @@ function buildHref(params: Record<string, string | undefined>) {
   for (const [k, v] of Object.entries(params)) if (v) search.set(k, v)
   const qs = search.toString()
   return qs ? `/?${qs}` : '/'
-}
-
-function isOverdue(t: TicketListRow): boolean {
-  if (!t.due_date || t.status === 'resolt') return false
-  return t.due_date < new Date().toISOString().slice(0, 10)
 }
 
 export default async function TicketsPage({
@@ -217,57 +211,7 @@ export default async function TicketsPage({
           Cap fitxa amb aquests filtres.
         </div>
       ) : (
-        <ul className="space-y-2">
-          {rows.map((t) => (
-            <li key={t.id}>
-              <Link
-                href={`/tickets/${t.id}`}
-                className="card block p-4 transition-colors hover:border-[var(--color-brand)]"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
-                      <span className="font-mono font-semibold">{ticketRef(t.id)}</span>
-                      <span className="truncate">
-                        {t.zone_name ?? 'Sense zona'} · {t.work_type_name ?? 'Sense tipus'}
-                      </span>
-                    </div>
-                    <h2 className="mt-1 font-semibold">{t.title}</h2>
-                    {t.description && (
-                      <p className="mt-1 text-sm text-[var(--color-muted)]">
-                        {truncate(t.description, 140)}
-                      </p>
-                    )}
-                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[var(--color-muted)]">
-                      <ApprovalPips
-                        approvals={{
-                          responsable: t.approved_responsable_at,
-                          tecnics: t.approved_tecnics_at,
-                          propietari: t.approved_propietari_at,
-                        }}
-                      />
-                      <span>
-                        {t.comment_count} {t.comment_count === 1 ? 'comentari' : 'comentaris'}
-                      </span>
-                      {t.due_date && (
-                        <span className={isOverdue(t) ? 'font-semibold text-red-700' : undefined}>
-                          Venç: {formatDate(t.due_date)}
-                        </span>
-                      )}
-                      {(t.assignee_name || t.assignee_email || t.assignee_team_name) && (
-                        <span>
-                          → {t.assignee_team_name ? `Equip ${t.assignee_team_name}` : t.assignee_name || t.assignee_email}
-                        </span>
-                      )}
-                      <span className="ml-auto">{formatDate(t.updated_at)}</span>
-                    </div>
-                  </div>
-                  <StatusBadge status={t.status} />
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <TicketList rows={rows} />
       )}
     </div>
   )
