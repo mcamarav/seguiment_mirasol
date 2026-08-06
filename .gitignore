@@ -12,3 +12,6 @@ next-env.d.ts
 .DS_Store
 .vercel
 .env*
+
+# PDFs exportats des de la vista d'impressió
+*.pdf
