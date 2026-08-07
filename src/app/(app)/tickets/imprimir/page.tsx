@@ -68,20 +68,26 @@ export default async function ImprimirPage({
   const imagesFor = (ticketId: number, field: TicketFieldImage['field']) =>
     (images.get(ticketId) ?? []).filter((i) => i.field === field)
 
-  const zoneName = (zones as Zone[] | null)?.find((z) => String(z.id) === filters.zona)?.name ?? null
-  const typeName =
-    (workTypes as WorkType[] | null)?.find((w) => String(w.id) === filters.tipus)?.name ?? null
-  const assigneeName = filters.assignat.startsWith('team:')
-    ? `Equip ${
-        (teamRows as { id: number; name: string }[] | null)?.find(
-          (t) => String(t.id) === filters.assignat.slice(5),
-        )?.name ?? '—'
-      }`
-    : filters.assignat.startsWith('user:')
-      ? displayName(
-          ((profiles ?? []) as Profile[]).find((p) => p.id === filters.assignat.slice(5)) ?? null,
-        )
-      : null
+  const zoneNames = filters.zona.flatMap(
+    (id) => (zones as Zone[] | null)?.filter((z) => String(z.id) === id).map((z) => z.name) ?? [],
+  )
+  const typeNames = filters.tipus.flatMap(
+    (id) =>
+      (workTypes as WorkType[] | null)?.filter((w) => String(w.id) === id).map((w) => w.name) ?? [],
+  )
+  const teamList = (teamRows ?? []) as { id: number; name: string }[]
+  const people = (profiles ?? []) as Profile[]
+  const assigneeNames = filters.assignat.flatMap((value) => {
+    if (value.startsWith('team:')) {
+      const team = teamList.find((t) => String(t.id) === value.slice(5))
+      return team ? [`Equip ${team.name}`] : []
+    }
+    if (value.startsWith('user:')) {
+      const person = people.find((p) => p.id === value.slice(5))
+      return person ? [displayName(person)] : []
+    }
+    return []
+  })
 
   return (
     <div className="space-y-4">
@@ -100,7 +106,7 @@ export default async function ImprimirPage({
       <header className="border-b border-[var(--color-line)] pb-3">
         <h1 className="text-xl font-bold tracking-tight">Seguiment Mirasol · Fitxes</h1>
         <p className="mt-1 text-sm text-[var(--color-muted)]">
-          {describeFilters(filters, zoneName, typeName, assigneeName)}
+          {describeFilters(filters, zoneNames, typeNames, assigneeNames)}
         </p>
         <p className="mt-0.5 text-xs text-[var(--color-muted)]">
           {rows.length} {rows.length === 1 ? 'fitxa' : 'fitxes'} · generat el{' '}

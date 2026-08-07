@@ -5,6 +5,7 @@ import { canCreateTickets, STATUS_LABELS } from '@/lib/permissions'
 import { toTeamsWithMembers } from '@/lib/teams'
 import { displayName } from '@/lib/format'
 import { TicketList } from './TicketList'
+import { FilterMultiSelect } from './FilterMultiSelect'
 import {
   buildHref,
   hrefFor,
@@ -13,7 +14,7 @@ import {
   TABS,
   ticketListQuery,
 } from './ticket-filters'
-import type { Profile, TicketListRow, Zone } from '@/lib/types'
+import type { Profile, TicketListRow, WorkType, Zone } from '@/lib/types'
 
 export default async function TicketsPage({
   searchParams,
@@ -41,6 +42,9 @@ export default async function TicketsPage({
 
   const counts = { obert: 0, solucio_acordada: 0, resolt: 0 }
   for (const r of rows) counts[r.status] += 1
+
+  const hasFilters =
+    zona.length > 0 || tipus.length > 0 || assignat.length > 0 || q !== '' || ordre !== 'updated_desc'
 
   return (
     <div className="space-y-4">
@@ -77,70 +81,79 @@ export default async function TicketsPage({
         ))}
       </nav>
 
-      <Form action="/" className="card grid grid-cols-2 gap-2 p-3 sm:grid-cols-4">
+      <Form action="/" className="card space-y-3 p-3">
         <input type="hidden" name="estat" value={tab} />
-        <select name="zona" defaultValue={zona} className="field truncate" aria-label="Zona">
-          <option value="">Totes les zones</option>
-          {(zones as Zone[] | null)?.map((z) => (
-            <option key={z.id} value={z.id}>
-              {z.name}
-            </option>
-          ))}
-        </select>
-        <select name="tipus" defaultValue={tipus} className="field truncate" aria-label="Tipus">
-          <option value="">Tots els tipus</option>
-          {(workTypes as Zone[] | null)?.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-        <select
-          name="assignat"
-          defaultValue={assignat}
-          className="field truncate"
-          aria-label="Assignat a"
-        >
-          <option value="">Assignat a tothom</option>
-          {teams.length > 0 && (
-            <optgroup label="Equips">
-              {teams.map((t) => (
-                <option key={`team:${t.id}`} value={`team:${t.id}`}>
-                  {t.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          <optgroup label="Persones">
-            {assignees.map((p) => (
-              <option key={`user:${p.id}`} value={`user:${p.id}`}>
-                {displayName(p)}
+
+        <div className="grid items-start gap-3 sm:grid-cols-3">
+          <FilterMultiSelect
+            name="zona"
+            label="Zones"
+            selected={zona}
+            options={((zones ?? []) as Zone[]).map((z) => ({
+              value: String(z.id),
+              label: z.name,
+            }))}
+          />
+          <FilterMultiSelect
+            name="tipus"
+            label="Tipus"
+            selected={tipus}
+            options={((workTypes ?? []) as WorkType[]).map((t) => ({
+              value: String(t.id),
+              label: t.name,
+            }))}
+          />
+          <FilterMultiSelect
+            name="assignat"
+            label="Assignat a"
+            selected={assignat}
+            options={[
+              ...teams.map((t) => ({
+                value: `team:${t.id}`,
+                label: t.name,
+                group: 'Equips',
+              })),
+              ...assignees.map((p) => ({
+                value: `user:${p.id}`,
+                label: displayName(p),
+                group: 'Persones',
+              })),
+            ]}
+          />
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto] sm:items-center">
+          <input
+            name="q"
+            defaultValue={q}
+            className="field"
+            placeholder="Cercar per nom o descripció…"
+            aria-label="Cercar"
+          />
+          <select
+            name="ordre"
+            defaultValue={ordre}
+            className="field truncate"
+            aria-label="Ordenar per"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
               </option>
             ))}
-          </optgroup>
-        </select>
-        <select
-          name="ordre"
-          defaultValue={ordre}
-          className="field truncate"
-          aria-label="Ordenar per"
-        >
-          {SORT_OPTIONS.map((o) => (
-            <option key={o.key} value={o.key}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <input
-          name="q"
-          defaultValue={q}
-          className="field col-span-2 sm:col-span-3"
-          placeholder="Cercar per nom o descripció…"
-          aria-label="Cercar"
-        />
-        <button type="submit" className="btn btn-secondary">
-          Filtrar
-        </button>
+          </select>
+          <button type="submit" className="btn btn-secondary">
+            Filtrar
+          </button>
+          {hasFilters && (
+            <Link
+              href={buildHref({ estat: tab })}
+              className="px-2 text-center text-sm font-semibold text-[var(--color-muted)]"
+            >
+              Netejar
+            </Link>
+          )}
+        </div>
       </Form>
 
       {error && (
