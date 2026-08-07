@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export interface FilterOption {
   value: string
@@ -27,6 +27,19 @@ export function FilterMultiSelect({
   selected: string[]
 }) {
   const [selected, setSelected] = useState<string[]>(initialSelected)
+  const [open, setOpen] = useState(false)
+  const detailsRef = useRef<HTMLDetailsElement>(null)
+
+  // En prémer «Filtrar» el panell es plega. L'obertura ha de ser estat de React
+  // (no només del DOM): la navegació del formulari és suau i no recrea el node,
+  // així que el <details> es quedaria obert tot sol.
+  useEffect(() => {
+    const form = detailsRef.current?.closest('form')
+    if (!form) return
+    const close = () => setOpen(false)
+    form.addEventListener('submit', close)
+    return () => form.removeEventListener('submit', close)
+  }, [])
 
   const toggle = (value: string) =>
     setSelected((prev) =>
@@ -40,7 +53,12 @@ export function FilterMultiSelect({
   let lastGroup: string | undefined
 
   return (
-    <details className="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)]">
+    <details
+      ref={detailsRef}
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+      className="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)]"
+    >
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
         <span className="min-w-0 flex-1">
           <span className="field-label">{label}</span>
