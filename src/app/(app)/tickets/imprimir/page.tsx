@@ -5,6 +5,7 @@ import { displayName, formatDate } from '@/lib/format'
 import { describeFilters, hrefFor, parseTicketFilters, ticketListQuery } from '../../ticket-filters'
 import { PrintButton } from './PrintButton'
 import { PrintTicket } from './PrintTicket'
+import './print.css'
 import type { Profile, TicketFieldImage, TicketListRow, WorkType, Zone } from '@/lib/types'
 
 const SIGNED_URL_TTL = 60 * 60 // 1 hora
@@ -99,36 +100,35 @@ export default async function ImprimirPage({
       </div>
 
       <p className="no-print text-xs text-[var(--color-muted)]">
-        Al diàleg d’impressió, tria «Desa com a PDF» com a destinació. Cada fitxa s’imprimeix
-        sencera, sense partir-se entre pàgines.
+        Al diàleg d’impressió, tria «Desa com a PDF», mida A4 i marges «per defecte». Cada fitxa
+        s’imprimeix sencera, sense partir-se entre pàgines.
       </p>
 
-      <header className="border-b border-[var(--color-line)] pb-3">
-        <h1 className="text-xl font-bold tracking-tight">Seguiment Mirasol · Fitxes</h1>
-        <p className="mt-1 text-sm text-[var(--color-muted)]">
-          {describeFilters(filters, zoneNames, typeNames, assigneeNames)}
-        </p>
-        <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-          {rows.length} {rows.length === 1 ? 'fitxa' : 'fitxes'} · generat el{' '}
-          {formatDate(new Date().toISOString())}
-        </p>
-      </header>
+      <div className="print-sheet">
+        <header className="print-doc-head">
+          <h1 className="print-doc-title">Seguiment Mirasol · Fitxes</h1>
+          <p className="print-doc-meta">
+            {describeFilters(filters, zoneNames, typeNames, assigneeNames)}
+          </p>
+          <p className="print-doc-count">
+            {rows.length} {rows.length === 1 ? 'fitxa' : 'fitxes'} · generat el{' '}
+            {formatDate(new Date().toISOString())}
+          </p>
+        </header>
 
-      {rows.length === 0 ? (
-        <p className="text-sm text-[var(--color-muted)]">Cap fitxa amb aquests filtres.</p>
-      ) : (
-        <ul className="space-y-4">
-          {rows.map((t) => (
-            <li key={t.id}>
-              <PrintTicket
-                ticket={t}
-                descriptionImages={imagesFor(t.id, 'description')}
-                solutionImages={imagesFor(t.id, 'agreed_solution')}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
+        {rows.length === 0 ? (
+          <p>Cap fitxa amb aquests filtres.</p>
+        ) : (
+          rows.map((t) => (
+            <PrintTicket
+              key={t.id}
+              ticket={t}
+              descriptionImages={imagesFor(t.id, 'description')}
+              solutionImages={imagesFor(t.id, 'agreed_solution')}
+            />
+          ))
+        )}
+      </div>
     </div>
   )
 }

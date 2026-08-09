@@ -120,29 +120,11 @@ select:focus-visible {
   outline-offset: 1px;
 }
 
-/* Vista d'impressió (/tickets/imprimir → "Desa com a PDF" del navegador).
-   `.no-print` marca el que només té sentit a pantalla; `.print-ticket` evita
-   que una fitxa quedi partida entre dues pàgines. */
+/* `.no-print` marca el que només té sentit a pantalla. La resta d'estils de la
+   vista d'impressió viuen a tickets/imprimir/print.css. */
 @media print {
-  @page {
-    margin: 14mm;
-  }
-
-  html,
-  body {
-    background: #fff;
-    /* Sense això els navegadors no imprimeixen el color de les etiquetes d'estat. */
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
   .no-print {
     display: none !important;
-  }
-
-  .print-ticket {
-    break-inside: avoid;
-    page-break-inside: avoid;
   }
 
   a {

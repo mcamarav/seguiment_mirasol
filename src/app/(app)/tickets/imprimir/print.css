@@ -1,0 +1,182 @@
+/* Estils de la vista d'impressió (/tickets/imprimir → "Desa com a PDF").
+   Pensats per a un full A4 concret, no per a pantalla: amplades en mm, mides
+   de lletra en pt i cap punt de ruptura responsive. Tot en negre pur, perquè
+   els grisos surten trencats i clars a la impressora. */
+
+@page {
+  size: A4 portrait;
+  margin: 12mm;
+}
+
+/* El "full": 210mm amb 12mm de marge intern, igual que l'@page. A pantalla es
+   veu com un paper centrat; a la impressora els marges els posa l'@page. */
+.print-sheet {
+  width: 210mm;
+  margin: 0 auto;
+  padding: 12mm;
+  background: #fff;
+  color: #000;
+  font-size: 9.5pt;
+  line-height: 1.35;
+  border: 1px solid #000;
+}
+
+.print-sheet p,
+.print-sheet dd {
+  orphans: 3;
+  widows: 3;
+}
+
+/* Capçalera del document: filtres aplicats i data. Només al primer full. */
+.print-doc-head {
+  border-bottom: 2pt solid #000;
+  padding-bottom: 2.5mm;
+  margin-bottom: 5mm;
+}
+
+.print-doc-title {
+  font-size: 15pt;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.print-doc-meta {
+  margin-top: 1.5mm;
+  font-size: 9pt;
+}
+
+.print-doc-count {
+  margin-top: 0.8mm;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Una fitxa. Marc gruixut i cantonades rectes; mai partida entre dos fulls. */
+.print-ticket {
+  border: 1.5pt solid #000;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-ticket + .print-ticket {
+  margin-top: 5mm;
+}
+
+/* Banda superior negra amb referència, nom i estat. */
+.print-ticket-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 4mm;
+  background: #000;
+  color: #fff;
+  padding: 2mm 3mm;
+}
+
+.print-ticket-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9pt;
+  font-weight: 700;
+  padding-top: 0.6mm;
+}
+
+.print-ticket-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.print-status {
+  flex-shrink: 0;
+  border: 1pt solid #fff;
+  padding: 0.6mm 2mm;
+  font-size: 7.5pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+/* Franja de dades: zona, tipus i assignació, separades per línies sòlides. */
+.print-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  border-bottom: 1pt solid #000;
+}
+
+.print-meta > div {
+  padding: 1.8mm 3mm;
+}
+
+.print-meta > div + div {
+  border-left: 1pt solid #000;
+}
+
+/* Cos: descripció i solució proposada, sempre a dues columnes. */
+.print-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.print-body > div {
+  padding: 2.5mm 3mm;
+}
+
+.print-body > div + div {
+  border-left: 1pt solid #000;
+}
+
+.print-label {
+  display: block;
+  font-size: 7.5pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 1mm;
+  border-bottom: 0.75pt solid #000;
+  padding-bottom: 0.5mm;
+}
+
+.print-value {
+  white-space: pre-wrap;
+}
+
+/* Imatges d'alçada fixa perquè les fitxes ocupin sempre el mateix. */
+.print-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2mm;
+  margin-top: 2mm;
+}
+
+.print-images img {
+  height: 30mm;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  border: 1pt solid #000;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+    /* Sense això els navegadors no imprimeixen la banda negra de la capçalera. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* La vista d'impressió no viu dins el contenidor de l'app. */
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .print-sheet {
+    width: auto;
+    padding: 0;
+    border: 0;
+  }
+}
