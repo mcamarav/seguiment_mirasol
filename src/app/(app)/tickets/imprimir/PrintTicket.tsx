@@ -1,5 +1,5 @@
 import { ticketRef } from '@/lib/format'
-import { STATUS_LABELS } from '@/lib/permissions'
+import { STAGE_LABELS, stageOf } from '@/lib/status'
 import type { TicketListRow } from '@/lib/types'
 
 /** Una fitxa a la vista d'impressió: marc sòlid, capçalera en banda negra i
@@ -23,7 +23,7 @@ export function PrintTicket({
       <div className="print-ticket-head">
         <span className="print-ticket-ref">{ticketRef(t.id)}</span>
         <h2 className="print-ticket-title">{t.title}</h2>
-        <span className="print-status">{STATUS_LABELS[t.status]}</span>
+        <span className="print-status">{STAGE_LABELS[stageOf(t)]}</span>
       </div>
 
       <div className="print-meta">

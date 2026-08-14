@@ -264,6 +264,11 @@ create table if not exists public.work_types (
 --   obert             -> la resta
 -- Qualsevol edició d'una fitxa reinicia les 3 aprovacions (trigger
 -- reset_approvals_on_edit): calen totes 3 de nou per a la versió nova.
+--
+-- Aquest estat és el gruixut, el que fan servir els filtres i les pestanyes.
+-- L'estat que es mostra a l'usuari és més detallat (executat, pendent
+-- aprovació tècnic, pendent aprovació propietari…) i es deriva de les tres
+-- dates d'aprovació a l'aplicació: vegeu src/lib/status.ts.
 -- -----------------------------------------------------------------------------
 create table if not exists public.tickets (
   id                       bigint generated always as identity primary key,

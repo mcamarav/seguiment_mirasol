@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import Form from 'next/form'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
-import { canCreateTickets, STATUS_LABELS } from '@/lib/permissions'
+import { canCreateTickets } from '@/lib/permissions'
+import { STAGE_COUNT_LABELS, STAGES, stageOf, type TicketStage } from '@/lib/status'
 import { toTeamsWithMembers } from '@/lib/teams'
 import { displayName } from '@/lib/format'
 import { TicketList } from './TicketList'
@@ -40,8 +41,12 @@ export default async function TicketsPage({
 
   const rows = (tickets ?? []) as TicketListRow[]
 
-  const counts = { obert: 0, solucio_acordada: 0, resolt: 0 }
-  for (const r of rows) counts[r.status] += 1
+  // Recompte per estat detallat: només es mostren els estats que hi són.
+  const counts = Object.fromEntries(STAGES.map((s) => [s, 0])) as Record<TicketStage, number>
+  for (const r of rows) counts[stageOf(r)] += 1
+  const breakdown = STAGES.filter((s) => counts[s] > 0).map(
+    (s) => `${counts[s]} ${STAGE_COUNT_LABELS[s]}`,
+  )
 
   const hasFilters =
     zona.length > 0 || tipus.length > 0 || assignat.length > 0 || q !== '' || ordre !== 'updated_desc'
@@ -164,14 +169,7 @@ export default async function TicketsPage({
 
       <p className="text-sm text-[var(--color-muted)]">
         {rows.length} {rows.length === 1 ? 'fitxa' : 'fitxes'}
-        {tab !== 'resolts' && (
-          <>
-            {' · '}
-            {counts.obert} {STATUS_LABELS.obert.toLowerCase()}
-            {' · '}
-            {counts.solucio_acordada} amb solució proposada
-          </>
-        )}
+        {tab !== 'resolts' && breakdown.length > 0 && ` · ${breakdown.join(' · ')}`}
       </p>
 
       {rows.length === 0 ? (

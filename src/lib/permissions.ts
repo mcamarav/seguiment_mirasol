@@ -1,11 +1,5 @@
-import type { Actor, Profile, TicketStatus } from '@/lib/types'
+import type { Actor, Profile } from '@/lib/types'
 import { isAssignedToTicket, isInGlobalTeam, type TeamContext } from '@/lib/teams'
-
-export const STATUS_LABELS: Record<TicketStatus, string> = {
-  obert: 'Obert',
-  solucio_acordada: 'Solució proposada',
-  resolt: 'Resolt',
-}
 
 export const ACTOR_LABELS: Record<Actor, string> = {
   responsable: 'Responsable',

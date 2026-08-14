@@ -11,7 +11,7 @@ import type { TicketListRow } from '@/lib/types'
 // Les dues columnes de text van en `fr` (i amb minmax(0,…), perquè un títol
 // llarg no les faci créixer): així el títol sempre s'endú la part grossa de
 // l'espai, en lloc de quedar-se amb el que sobra de les columnes fixes.
-const COLUMNS = 'md:grid-cols-[5.5rem_minmax(0,2.2fr)_minmax(0,1.1fr)_7.5rem_6.5rem]'
+const COLUMNS = 'md:grid-cols-[5.5rem_minmax(0,2.2fr)_minmax(0,1.1fr)_7.5rem_10rem]'
 
 function isOverdue(t: TicketListRow): boolean {
   if (!t.due_date || t.status === 'resolt') return false
@@ -87,7 +87,7 @@ export function TicketList({ rows }: { rows: TicketListRow[] }) {
                 </div>
 
                 <div className="order-2 justify-self-end md:order-none md:justify-self-start">
-                  <StatusBadge status={t.status} short />
+                  <StatusBadge ticket={t} />
                 </div>
               </Link>
             </li>

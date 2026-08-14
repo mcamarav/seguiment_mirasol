@@ -1,3 +1,6 @@
+/** Estat tal com el calcula la base de dades (columna generada). És l'estat
+ * gruixut que fan servir els filtres i les pestanyes; l'estat que es mostra a
+ * l'usuari és més detallat i es deriva de les aprovacions (vegeu `lib/status`). */
 export type TicketStatus = 'obert' | 'solucio_acordada' | 'resolt'
 
 /** Les tres caselles d'aprovació que tanquen una fitxa. */

@@ -117,7 +117,7 @@ export default async function TicketDetailPage({
               {zoneName} · {typeName}
             </p>
           </div>
-          <StatusBadge status={t.status} />
+          <StatusBadge ticket={t} />
         </div>
 
         <dl className="mt-4 grid gap-3 border-t border-[var(--color-line)] pt-3 text-sm sm:grid-cols-2">
