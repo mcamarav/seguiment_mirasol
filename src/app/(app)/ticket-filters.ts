@@ -7,10 +7,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  * Zona, tipus i assignat accepten diversos valors (multiselect): la llista de
  * buida vol dir "tots", i si n'hi ha uns quants es filtra per qualsevol d'ells. */
 
-export type Tab = 'pendents' | 'resolts' | 'tots'
+export type Tab = 'pendents' | 'a_revisar' | 'resolts' | 'tots'
 
+// Les pestanyes són excloents: una fitxa «A revisar» no surt a «Pendents»,
+// perquè l'estat de la base de dades ja és un valor a part.
 export const TABS: { key: Tab; label: string }[] = [
   { key: 'pendents', label: 'Pendents' },
+  { key: 'a_revisar', label: 'A revisar' },
   { key: 'resolts', label: 'Resolts' },
   { key: 'tots', label: 'Tots' },
 ]
@@ -108,6 +111,7 @@ export function ticketListQuery(supabase: SupabaseClient<any>, f: TicketFilters)
     .order(sort.column, { ascending: sort.ascending, nullsFirst: false })
 
   if (f.tab === 'pendents') query = query.in('status', ['obert', 'solucio_acordada'])
+  if (f.tab === 'a_revisar') query = query.eq('status', 'a_revisar')
   if (f.tab === 'resolts') query = query.eq('status', 'resolt')
   if (f.zona.length > 0) query = query.in('zone_id', f.zona.map(Number))
   if (f.tipus.length > 0) query = query.in('work_type_id', f.tipus.map(Number))

@@ -3,9 +3,17 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
-import { canApprove, canCommentTicket, canCreateTickets, canEditTicket, isAdmin } from '@/lib/permissions'
+import {
+  canApprove,
+  canCommentTicket,
+  canCreateTickets,
+  canEditTicket,
+  canMarkReviewed,
+  canRequestReview,
+  isAdmin,
+} from '@/lib/permissions'
 import { buildTeamContext, toTeamsWithMembers } from '@/lib/teams'
-import type { Actor, Profile, TicketImageField } from '@/lib/types'
+import type { Actor, Profile, ReviewActor, TicketImageField } from '@/lib/types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export interface FormState {
@@ -18,6 +26,15 @@ const APPROVAL_COLUMN: Record<Actor, string> = {
   tecnics: 'approved_tecnics_at',
   propietari: 'approved_propietari_at',
 }
+
+const REVIEW_COLUMN: Record<ReviewActor, string> = {
+  tecnics: 'review_tecnics_at',
+  propietari: 'review_propietari_at',
+}
+
+/** Cap petició de revisió: el punt de partida quan el responsable torna a
+ * marcar la feina com a feta o quan retira la seva aprovació. */
+const NO_REVIEWS = { review_tecnics_at: null, review_propietari_at: null }
 
 function optional(formData: FormData, key: string): string | null {
   const value = String(formData.get(key) ?? '').trim()
@@ -53,7 +70,9 @@ async function loadTicket(
 ) {
   const { data } = await supabase
     .from('tickets')
-    .select('id, created_by, assignee_id, assignee_team_id')
+    // El literal ha d'anar sencer en una sola línia: és el que fa servir el
+    // client de Supabase per inferir el tipus de la fila.
+    .select('id, created_by, assignee_id, assignee_team_id, approved_responsable_at, review_tecnics_at, review_propietari_at')
     .eq('id', ticketId)
     .maybeSingle()
   return data
@@ -133,7 +152,11 @@ export async function updateTicket(_prev: FormState, formData: FormData): Promis
   return { ok: true }
 }
 
-/** Marca o desmarca l'aprovació d'un dels tres actors. */
+/** Marca o desmarca l'aprovació d'un dels tres actors.
+ *
+ * Aprovar i demanar revisió són excloents: qui aprova retira la seva petició de
+ * revisió, i si el responsable retira la seva aprovació desapareixen totes dues
+ * peticions (sense feina marcada com a feta no hi ha res a revisar). */
 export async function setApproval(
   ticketId: number,
   actor: Actor,
@@ -153,7 +176,84 @@ export async function setApproval(
 
   const { error } = await supabase
     .from('tickets')
-    .update({ [APPROVAL_COLUMN[actor]]: approve ? new Date().toISOString() : null })
+    .update({
+      [APPROVAL_COLUMN[actor]]: approve ? new Date().toISOString() : null,
+      ...(actor === 'responsable' && !approve ? NO_REVIEWS : {}),
+      ...(actor !== 'responsable' && approve ? { [REVIEW_COLUMN[actor]]: null } : {}),
+    })
+    .eq('id', ticketId)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/')
+  revalidatePath(`/tickets/${ticketId}`)
+  return { ok: true }
+}
+
+/** El tècnic o el propietari demanen (o desfan) la revisió de la feina: la
+ * fitxa passa a «A revisar» i torna a mans del responsable. */
+export async function setReview(
+  ticketId: number,
+  actor: ReviewActor,
+  request: boolean,
+): Promise<FormState> {
+  const profile = await getCurrentProfile()
+  if (!profile) return { error: 'Sessió caducada.' }
+
+  const supabase = await createClient()
+  const ticket = await loadTicket(supabase, ticketId)
+  if (!ticket) return { error: 'Fitxa no trobada.' }
+
+  const ctx = await loadTeamContext(supabase, profile)
+  if (!canRequestReview(actor, profile, ticket, ctx)) {
+    return { error: 'No tens permís per demanar la revisió d’aquesta fitxa.' }
+  }
+  if (request && !ticket.approved_responsable_at) {
+    return { error: 'Només es pot demanar revisió quan el responsable ha marcat la feina com a feta.' }
+  }
+
+  const { error } = await supabase
+    .from('tickets')
+    .update({
+      [REVIEW_COLUMN[actor]]: request ? new Date().toISOString() : null,
+      ...(request ? { [APPROVAL_COLUMN[actor]]: null } : {}),
+    })
+    .eq('id', ticketId)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/')
+  revalidatePath(`/tickets/${ticketId}`)
+  return { ok: true }
+}
+
+/** El responsable torna a marcar com a feta una fitxa «A revisar»: es retiren
+ * les peticions de revisió i es reinicien les aprovacions del tècnic i del
+ * propietari, que han de tornar a dir-hi la seva. */
+export async function markReviewed(ticketId: number): Promise<FormState> {
+  const profile = await getCurrentProfile()
+  if (!profile) return { error: 'Sessió caducada.' }
+
+  const supabase = await createClient()
+  const ticket = await loadTicket(supabase, ticketId)
+  if (!ticket) return { error: 'Fitxa no trobada.' }
+
+  const ctx = await loadTeamContext(supabase, profile)
+  if (!canMarkReviewed(profile, ticket, ctx)) {
+    return { error: 'No tens permís per canviar aquesta aprovació.' }
+  }
+  if (!ticket.review_tecnics_at && !ticket.review_propietari_at) {
+    return { error: 'Aquesta fitxa no està pendent de revisió.' }
+  }
+
+  const { error } = await supabase
+    .from('tickets')
+    .update({
+      approved_responsable_at: new Date().toISOString(),
+      approved_tecnics_at: null,
+      approved_propietari_at: null,
+      ...NO_REVIEWS,
+    })
     .eq('id', ticketId)
 
   if (error) return { error: error.message }

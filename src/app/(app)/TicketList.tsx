@@ -65,6 +65,10 @@ export function TicketList({ rows }: { rows: TicketListRow[] }) {
                         tecnics: t.approved_tecnics_at,
                         propietari: t.approved_propietari_at,
                       }}
+                      reviews={{
+                        tecnics: t.review_tecnics_at,
+                        propietari: t.review_propietari_at,
+                      }}
                     />
                   </p>
                   {t.description && (

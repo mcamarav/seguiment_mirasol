@@ -1,4 +1,4 @@
-import type { Actor, Profile } from '@/lib/types'
+import type { Actor, Profile, ReviewActor } from '@/lib/types'
 import { isAssignedToTicket, isInGlobalTeam, type TeamContext } from '@/lib/teams'
 
 export const ACTOR_LABELS: Record<Actor, string> = {
@@ -8,6 +8,14 @@ export const ACTOR_LABELS: Record<Actor, string> = {
 }
 
 export const ACTORS: Actor[] = ['responsable', 'tecnics', 'propietari']
+
+/** Els actors que poden demanar revisió (tots menys el responsable, que és qui
+ * l'ha de resoldre). */
+export const REVIEW_ACTORS: ReviewActor[] = ['tecnics', 'propietari']
+
+export function isReviewActor(actor: Actor): actor is ReviewActor {
+  return actor !== 'responsable'
+}
 
 export function isAdmin(profile: Profile): boolean {
   return profile.is_admin
@@ -54,6 +62,26 @@ export function canApprove(
   if (actor === 'responsable') return isAssignedToTicket(ticket, profile.id, ctx)
   if (actor === 'tecnics') return isInGlobalTeam(ctx, 'tecnics')
   return isInGlobalTeam(ctx, 'propietaris')
+}
+
+/** Demanar (o desfer) la revisió té els mateixos permisos que aprovar la
+ * casella corresponent: és l'altra cara de la mateixa decisió. */
+export function canRequestReview(
+  actor: ReviewActor,
+  profile: Profile,
+  ticket: TicketAssignment,
+  ctx: TeamContext,
+): boolean {
+  return canApprove(actor, profile, ticket, ctx)
+}
+
+/** Tornar a marcar com a feta una fitxa «A revisar»: ho fa el responsable. */
+export function canMarkReviewed(
+  profile: Profile,
+  ticket: TicketAssignment,
+  ctx: TeamContext,
+): boolean {
+  return canApprove('responsable', profile, ticket, ctx)
 }
 
 export function approvalsFor(

@@ -260,10 +260,13 @@ create table if not exists public.work_types (
 --
 -- L'estat és una columna generada, no s'edita a mà:
 --   resolt            -> les 3 aprovacions fetes
+--   a_revisar         -> el responsable ha marcat OK però el tècnic o el
+--                        propietari han demanat revisió (review_*_at)
 --   solucio_acordada  -> hi ha una solució proposada (agreed_solution) escrita
 --   obert             -> la resta
--- Qualsevol edició d'una fitxa reinicia les 3 aprovacions (trigger
--- reset_approvals_on_edit): calen totes 3 de nou per a la versió nova.
+-- Qualsevol edició d'una fitxa reinicia les 3 aprovacions i les peticions de
+-- revisió (trigger reset_approvals_on_edit): cal tornar a passar el circuit
+-- sencer per a la versió nova.
 --
 -- Aquest estat és el gruixut, el que fan servir els filtres i les pestanyes.
 -- L'estat que es mostra a l'usuari és més detallat (executat, pendent
@@ -283,16 +286,13 @@ create table if not exists public.tickets (
   approved_tecnics_by      uuid references public.profiles(id) on delete set null,
   approved_propietari_at   timestamptz,
   approved_propietari_by   uuid references public.profiles(id) on delete set null,
-  status text generated always as (
-    case
-      when approved_responsable_at is not null
-       and approved_tecnics_at     is not null
-       and approved_propietari_at  is not null then 'resolt'
-      when agreed_solution is not null and btrim(agreed_solution) <> ''
-        then 'solucio_acordada'
-      else 'obert'
-    end
-  ) stored,
+  -- Petició de revisió: el tècnic o el propietari diuen que allò que el
+  -- responsable ha marcat com a fet no els fa el pes. És excloent amb la seva
+  -- pròpia aprovació (vegeu els checks de més avall).
+  review_tecnics_at        timestamptz,
+  review_tecnics_by        uuid references public.profiles(id) on delete set null,
+  review_propietari_at     timestamptz,
+  review_propietari_by     uuid references public.profiles(id) on delete set null,
   created_by uuid references public.profiles(id) on delete set null default auth.uid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -307,9 +307,60 @@ alter table public.tickets add column if not exists assignee_id
 alter table public.tickets add column if not exists assignee_team_id
   bigint references public.teams(id) on delete set null;
 
+alter table public.tickets add column if not exists review_tecnics_at    timestamptz;
+alter table public.tickets add column if not exists review_tecnics_by    uuid
+  references public.profiles(id) on delete set null;
+alter table public.tickets add column if not exists review_propietari_at timestamptz;
+alter table public.tickets add column if not exists review_propietari_by uuid
+  references public.profiles(id) on delete set null;
+
 alter table public.tickets drop constraint if exists tickets_assignee_single_check;
 alter table public.tickets add constraint tickets_assignee_single_check
   check (not (assignee_id is not null and assignee_team_id is not null));
+
+-- Per a cada actor, aprovar i demanar revisió són excloents; i no es pot
+-- demanar revisió si el responsable encara no ha marcat la feina com a feta.
+alter table public.tickets drop constraint if exists tickets_tecnics_review_check;
+alter table public.tickets add constraint tickets_tecnics_review_check
+  check (not (approved_tecnics_at is not null and review_tecnics_at is not null));
+alter table public.tickets drop constraint if exists tickets_propietari_review_check;
+alter table public.tickets add constraint tickets_propietari_review_check
+  check (not (approved_propietari_at is not null and review_propietari_at is not null));
+alter table public.tickets drop constraint if exists tickets_review_needs_responsable_check;
+alter table public.tickets add constraint tickets_review_needs_responsable_check
+  check (approved_responsable_at is not null
+     or (review_tecnics_at is null and review_propietari_at is null));
+
+-- L'estat gruixut. Es crea aquí (i no dins del create table) perquè depèn de
+-- les columnes de revisió, que en bases de dades antigues s'afegeixen amb els
+-- ALTER de més amunt. Si la columna existeix amb l'expressió antiga (sense
+-- 'a_revisar') es refà: una columna generada no es pot redefinir, cal
+-- esborrar-la i tornar-la a crear.
+do $$ begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'tickets' and column_name = 'status'
+      and coalesce(generation_expression::text, '') not like '%a_revisar%'
+  ) then
+    drop view if exists public.ticket_list;
+    alter table public.tickets drop column status;
+  end if;
+end $$;
+
+alter table public.tickets add column if not exists status text
+  generated always as (
+    case
+      when approved_responsable_at is not null
+       and approved_tecnics_at     is not null
+       and approved_propietari_at  is not null then 'resolt'
+      when approved_responsable_at is not null
+       and (review_tecnics_at is not null or review_propietari_at is not null)
+        then 'a_revisar'
+      when agreed_solution is not null and btrim(agreed_solution) <> ''
+        then 'solucio_acordada'
+      else 'obert'
+    end
+  ) stored;
 
 -- Data de resolució: automàtica, la data de l'última de les 3 aprovacions
 -- (no es pot desquadrar amb l'estat perquè es calcula igual que ell).
@@ -386,23 +437,28 @@ create trigger tickets_touch_updated_at
 --   Responsable -> qui té la fitxa assignada (persona o equip)
 --   Tècnics     -> qualsevol membre de l'equip amb rol global 'tecnics'
 --   Propietari  -> qualsevol membre de l'equip amb rol global 'propietaris'
+-- El responsable, a més, pot *esborrar* l'aprovació i la petició de revisió del
+-- tècnic i del propietari: és el que fa quan torna a marcar la feina com a feta
+-- («Revisat»), que reinicia el circuit d'aprovacions.
 create or replace function public.guard_ticket_approvals()
 returns trigger
 language plpgsql security definer set search_path = public as $$
-declare admin boolean;
+declare
+  admin       boolean;
+  responsable boolean;
 begin
   select p.is_admin into admin from public.profiles p where p.id = auth.uid();
   if admin is null then
     raise exception 'No s''ha trobat el perfil de l''usuari';
   end if;
 
+  responsable := admin or old.assignee_id = auth.uid()
+    or (old.assignee_team_id is not null and exists (
+          select 1 from public.team_members
+          where team_id = old.assignee_team_id and user_id = auth.uid()));
+
   if new.approved_responsable_at is distinct from old.approved_responsable_at then
-    if not admin and not (
-      old.assignee_id = auth.uid()
-      or (old.assignee_team_id is not null and exists (
-            select 1 from public.team_members
-            where team_id = old.assignee_team_id and user_id = auth.uid()))
-    ) then
+    if not responsable then
       raise exception 'Només qui té la fitxa assignada (o un admin) pot canviar aquesta aprovació';
     end if;
     new.approved_responsable_by :=
@@ -410,7 +466,8 @@ begin
   end if;
 
   if new.approved_tecnics_at is distinct from old.approved_tecnics_at then
-    if not admin and not public.is_global_team_member('tecnics') then
+    if not admin and not public.is_global_team_member('tecnics')
+       and not (new.approved_tecnics_at is null and responsable) then
       raise exception 'Només algú de l''equip de tècnics (o un admin) pot canviar aquesta aprovació';
     end if;
     new.approved_tecnics_by :=
@@ -418,11 +475,32 @@ begin
   end if;
 
   if new.approved_propietari_at is distinct from old.approved_propietari_at then
-    if not admin and not public.is_global_team_member('propietaris') then
+    if not admin and not public.is_global_team_member('propietaris')
+       and not (new.approved_propietari_at is null and responsable) then
       raise exception 'Només algú de l''equip de propietaris (o un admin) pot canviar aquesta aprovació';
     end if;
     new.approved_propietari_by :=
       case when new.approved_propietari_at is null then null else auth.uid() end;
+  end if;
+
+  -- Peticions de revisió: les demana l'actor mateix; les pot retirar ell o el
+  -- responsable (quan torna a marcar la fitxa com a feta).
+  if new.review_tecnics_at is distinct from old.review_tecnics_at then
+    if not admin and not public.is_global_team_member('tecnics')
+       and not (new.review_tecnics_at is null and responsable) then
+      raise exception 'Només algú de l''equip de tècnics (o un admin) pot demanar la revisió';
+    end if;
+    new.review_tecnics_by :=
+      case when new.review_tecnics_at is null then null else auth.uid() end;
+  end if;
+
+  if new.review_propietari_at is distinct from old.review_propietari_at then
+    if not admin and not public.is_global_team_member('propietaris')
+       and not (new.review_propietari_at is null and responsable) then
+      raise exception 'Només algú de l''equip de propietaris (o un admin) pot demanar la revisió';
+    end if;
+    new.review_propietari_by :=
+      case when new.review_propietari_at is null then null else auth.uid() end;
   end if;
 
   return new;
@@ -434,8 +512,8 @@ create trigger tickets_guard_approvals
   for each row execute function public.guard_ticket_approvals();
 
 -- Editar qualsevol camp de la fitxa (títol, descripció, zona, tipus, solució
--- proposada, data prevista o assignació) reinicia les 3 aprovacions: calen
--- totes 3 de nou per a la versió editada.
+-- proposada, data prevista o assignació) reinicia les 3 aprovacions i les
+-- peticions de revisió: cal tornar a passar el circuit per a la versió editada.
 create or replace function public.reset_approvals_on_edit()
 returns trigger language plpgsql as $$
 begin
@@ -451,6 +529,8 @@ begin
     new.approved_responsable_at := null; new.approved_responsable_by := null;
     new.approved_tecnics_at     := null; new.approved_tecnics_by     := null;
     new.approved_propietari_at  := null; new.approved_propietari_by  := null;
+    new.review_tecnics_at       := null; new.review_tecnics_by       := null;
+    new.review_propietari_at    := null; new.review_propietari_by    := null;
   end if;
   return new;
 end $$;
@@ -635,6 +715,8 @@ select
   t.approved_responsable_at,
   t.approved_tecnics_at,
   t.approved_propietari_at,
+  t.review_tecnics_at,
+  t.review_propietari_at,
   t.due_date,
   t.resolved_at,
   t.assignee_id,

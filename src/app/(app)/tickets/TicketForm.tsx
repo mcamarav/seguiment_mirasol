@@ -31,8 +31,13 @@ export function TicketForm({
     isEdit ? updateTicket : createTicket,
     {},
   )
+  // Editar reinicia les aprovacions i també les peticions de revisió.
   const hasAnyApproval = Boolean(
-    ticket?.approved_responsable_at || ticket?.approved_tecnics_at || ticket?.approved_propietari_at,
+    ticket?.approved_responsable_at ||
+      ticket?.approved_tecnics_at ||
+      ticket?.approved_propietari_at ||
+      ticket?.review_tecnics_at ||
+      ticket?.review_propietari_at,
   )
 
   return (
@@ -192,7 +197,7 @@ export function TicketForm({
           {hasAnyApproval && (
             <>
               {' '}
-              Com que ja hi ha aprovacions fetes, si canvies aquest text{' '}
+              Com que ja hi ha aprovacions o revisions demanades, si canvies aquest text{' '}
               <strong>es reiniciaran</strong>.
             </>
           )}

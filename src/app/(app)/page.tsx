@@ -169,7 +169,7 @@ export default async function TicketsPage({
 
       <p className="text-sm text-[var(--color-muted)]">
         {rows.length} {rows.length === 1 ? 'fitxa' : 'fitxes'}
-        {tab !== 'resolts' && breakdown.length > 0 && ` · ${breakdown.join(' · ')}`}
+        {tab !== 'resolts' && tab !== 'a_revisar' && breakdown.length > 0 && ` · ${breakdown.join(' · ')}`}
       </p>
 
       {rows.length === 0 ? (

@@ -190,6 +190,14 @@ export default async function TicketDetailPage({
           tecnics: nameOf(t.approved_tecnics_by),
           propietari: nameOf(t.approved_propietari_by),
         }}
+        reviews={{
+          tecnics: t.review_tecnics_at,
+          propietari: t.review_propietari_at,
+        }}
+        reviewedBy={{
+          tecnics: nameOf(t.review_tecnics_by),
+          propietari: nameOf(t.review_propietari_by),
+        }}
       />
 
       {canEdit && (

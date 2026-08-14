@@ -1,11 +1,12 @@
 import { STAGE_LABELS, stageOf, type StageSource, type TicketStage } from '@/lib/status'
 
 // El color acompanya el circuit: ambre mentre és pendent, blau quan hi ha
-// solució, violeta un cop executada, teal mentre falten aprovacions i verd
-// quan ja està tancada.
+// solució, rosa quan cal tornar-hi, violeta un cop executada, teal mentre
+// falten aprovacions i verd quan ja està tancada.
 const STYLES: Record<TicketStage, string> = {
   pendent: 'bg-amber-100 text-amber-900',
   pendent_solucio: 'bg-sky-100 text-sky-900',
+  a_revisar: 'bg-rose-100 text-rose-900',
   executat: 'bg-violet-100 text-violet-900',
   pendent_tecnic: 'bg-teal-100 text-teal-900',
   pendent_propietari: 'bg-teal-100 text-teal-900',

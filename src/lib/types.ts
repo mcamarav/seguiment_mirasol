@@ -1,10 +1,13 @@
 /** Estat tal com el calcula la base de dades (columna generada). És l'estat
  * gruixut que fan servir els filtres i les pestanyes; l'estat que es mostra a
  * l'usuari és més detallat i es deriva de les aprovacions (vegeu `lib/status`). */
-export type TicketStatus = 'obert' | 'solucio_acordada' | 'resolt'
+export type TicketStatus = 'obert' | 'solucio_acordada' | 'a_revisar' | 'resolt'
 
 /** Les tres caselles d'aprovació que tanquen una fitxa. */
 export type Actor = 'responsable' | 'tecnics' | 'propietari'
+
+/** Els dos actors que, en lloc d'aprovar, poden demanar que es revisi la feina. */
+export type ReviewActor = Exclude<Actor, 'responsable'>
 
 /** Equip global que aprova aquella casella arreu, no només a les fitxes assignades. */
 export type GlobalTeamRole = 'tecnics' | 'propietaris'
@@ -63,6 +66,8 @@ export interface TicketListRow {
   approved_responsable_at: string | null
   approved_tecnics_at: string | null
   approved_propietari_at: string | null
+  review_tecnics_at: string | null
+  review_propietari_at: string | null
   due_date: string | null
   resolved_at: string | null
   assignee_id: string | null
@@ -89,6 +94,10 @@ export interface Ticket {
   approved_tecnics_by: string | null
   approved_propietari_at: string | null
   approved_propietari_by: string | null
+  review_tecnics_at: string | null
+  review_tecnics_by: string | null
+  review_propietari_at: string | null
+  review_propietari_by: string | null
   due_date: string | null
   resolved_at: string | null
   assignee_id: string | null

@@ -14,18 +14,25 @@ Next.js (App Router) + Supabase (autenticació, Postgres i emmagatzematge d'imat
 - **Tres aprovacions** — responsable, tècnics i propietari — sobre la solució
   proposada. La fitxa queda **resolta** automàticament quan totes tres hi són,
   i la data de resolució es calcula sola (la de l'última aprovació).
+- **Revisió**: quan el responsable ja ha marcat la feina com a feta, el tècnic i
+  el propietari poden demanar **revisió** en lloc d'aprovar. La fitxa passa a
+  **A revisar** i torna a mans del responsable, que quan ho hagi refet la marca
+  com a **Revisat**: això retira les peticions de revisió i reinicia les
+  aprovacions del tècnic i del propietari, que han de tornar a dir-hi la seva.
+  Qui ha demanat la revisió també la pot desfer.
 - **Estat calculat** per la base de dades, no s'edita a mà:
 
   | Estat | Quan |
   |---|---|
   | Obert | per defecte |
   | Solució proposada | hi ha text al camp «Solució proposada» |
+  | A revisar | el responsable ha aprovat i el tècnic o el propietari han demanat revisió |
   | Resolt | les tres aprovacions fetes |
 
-  Si algú reescriu la solució proposada, les aprovacions que ja s'havien fet
-  es reinicien: cal tornar a aprovar-la els tres actors.
+  Si algú reescriu la solució proposada, les aprovacions i les peticions de
+  revisió que ja s'havien fet es reinicien: cal tornar a passar el circuit.
 
-- **Llistat** amb pestanyes Pendents / Resolts / Tots, filtres per zona, tipus i
+- **Llistat** amb pestanyes Pendents / A revisar / Resolts / Tots, filtres per zona, tipus i
   persona assignada, ordenació (publicació, data prevista, data de resolució,
   nom…), cerca per text i resum de cada fitxa (estat, aprovacions, nre. de
   comentaris, data prevista). Un clic obre la fitxa en detall.
@@ -130,8 +137,8 @@ que ja l'utilitzen.
 - Les imatges es pugen des del navegador directament a Supabase Storage,
   reduïdes a 1600 px de costat màxim per no cremar dades al mòbil. El *bucket*
   és privat; les fitxes les mostren amb URLs signades d'una hora.
-- Les aprovacions **es reinicien** (trigger `reset_approvals_on_solution_change`)
-  si algú reescriu la solució proposada després que ja s'hagin donat: calen
-  les 3 de nou per a la versió nova del text.
+- Les aprovacions i les peticions de revisió **es reinicien** (trigger
+  `reset_approvals_on_edit`) si algú edita la fitxa després que ja s'hagin
+  donat: cal tornar a passar el circuit per a la versió nova.
 - El camp «Assignat a» només ofereix usuaris amb rol admin/responsable/tècnic/
   propietari (els que poden editar fitxes).
