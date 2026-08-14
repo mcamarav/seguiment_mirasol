@@ -6,7 +6,6 @@ import { createClient } from '@/lib/supabase/client'
 import { shrinkImage } from '@/lib/image'
 import { addFieldImages, deleteFieldImage } from '../actions'
 import { useGlobalPending } from '@/components/PendingOverlay'
-import { SubmitButton } from '@/components/SubmitButton'
 import type { TicketImageField } from '@/lib/types'
 
 const MAX_FILES = 6
@@ -27,7 +26,19 @@ export function FieldImages({
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
   useGlobalPending(busy)
+
+  async function handleDelete(imageId: string) {
+    setError(null)
+    setBusy(true)
+    setDeleting(imageId)
+    const result = await deleteFieldImage(imageId, ticketId)
+    setBusy(false)
+    setDeleting(null)
+    if (result.error) setError(result.error)
+    else router.refresh()
+  }
 
   async function handleFiles(fileList: FileList | null) {
     const files = Array.from(fileList ?? []).slice(0, MAX_FILES)
@@ -83,16 +94,15 @@ export function FieldImages({
                 />
               </a>
               {canEdit && (
-                <form action={deleteFieldImage}>
-                  <input type="hidden" name="image_id" value={img.id} />
-                  <input type="hidden" name="ticket_id" value={ticketId} />
-                  <SubmitButton
-                    aria-label="Esborrar imatge"
-                    className="absolute top-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white opacity-0 group-hover:opacity-100"
-                  >
-                    ×
-                  </SubmitButton>
-                </form>
+                <button
+                  type="button"
+                  aria-label="Esborrar imatge"
+                  onClick={() => handleDelete(img.id)}
+                  disabled={busy}
+                  className="absolute top-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white opacity-0 group-hover:opacity-100"
+                >
+                  {deleting === img.id ? '…' : '×'}
+                </button>
               )}
             </li>
           ))}

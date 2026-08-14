@@ -359,17 +359,19 @@ export async function addFieldImages(
 }
 
 /** Esborra una imatge adjunta a la descripció o la solució proposada. */
-export async function deleteFieldImage(formData: FormData): Promise<void> {
+/** L'esborrat el crida directament el component (no un <form>): dins del
+ * formulari d'edició de la fitxa un form niat no és HTML vàlid. */
+export async function deleteFieldImage(imageId: string, ticketId: number): Promise<FormState> {
   const profile = await getCurrentProfile()
-  if (!profile) return
-
-  const imageId = String(formData.get('image_id') ?? '')
-  const ticketId = Number(formData.get('ticket_id'))
-  if (!imageId || !ticketId) return
+  if (!profile) return { error: 'Sessió caducada.' }
+  if (!imageId || !ticketId) return { error: 'Imatge no vàlida.' }
 
   const supabase = await createClient()
   const ticket = await loadTicket(supabase, ticketId)
-  if (!ticket || !canEditTicket(profile, ticket)) return
+  if (!ticket) return { error: 'Fitxa no trobada.' }
+  if (!canEditTicket(profile, ticket)) {
+    return { error: 'No tens permís per editar aquesta fitxa.' }
+  }
 
   const { data: image } = await supabase
     .from('ticket_field_images')
@@ -377,13 +379,15 @@ export async function deleteFieldImage(formData: FormData): Promise<void> {
     .eq('id', imageId)
     .maybeSingle()
 
-  await supabase.from('ticket_field_images').delete().eq('id', imageId)
+  const { error } = await supabase.from('ticket_field_images').delete().eq('id', imageId)
+  if (error) return { error: error.message }
 
   if (image?.storage_path) {
     await supabase.storage.from('ticket-images').remove([image.storage_path])
   }
 
   revalidatePath(`/tickets/${ticketId}`)
+  return { ok: true }
 }
 
 export async function deleteTicket(formData: FormData): Promise<void> {
