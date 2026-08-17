@@ -7,12 +7,12 @@ import { toTeamsWithMembers } from '@/lib/teams'
 import { displayName } from '@/lib/format'
 import { TicketList } from './TicketList'
 import { FilterMultiSelect } from './FilterMultiSelect'
+import { SortSelect } from './SortSelect'
 import {
   buildHref,
   ESTATS,
   hrefFor,
   parseTicketFilters,
-  SORT_OPTIONS,
   TOTS_ELS_ESTATS,
   ticketListQuery,
 } from './ticket-filters'
@@ -51,6 +51,10 @@ export default async function TicketsPage({
 
   const hasFilters =
     zona.length > 0 || tipus.length > 0 || assignat.length > 0 || q !== '' || ordre !== 'updated_desc'
+
+  // Valors marcats als tres selectors: decideix si el bloc surt desplegat en
+  // mòbil i quants n'anuncia el capçal quan està plegat.
+  const seleccionats = zona.length + tipus.length + assignat.length
 
   const totsMarcats = estats.length === TOTS_ELS_ESTATS.length
   // Els estats es marquen i es desmarquen un a un; desmarcar l'últim que
@@ -112,80 +116,98 @@ export default async function TicketsPage({
         </Link>
       </nav>
 
-      <Form action="/" className="card space-y-3 p-3">
+      <Form action="/" id="filtres" className="card space-y-3 p-3">
         {estats.map((e) => (
           <input key={e} type="hidden" name="estat" value={e} />
         ))}
 
-        <div className="grid items-start gap-3 sm:grid-cols-3">
-          <FilterMultiSelect
-            name="zona"
-            label="Zones"
-            selected={zona}
-            options={((zones ?? []) as Zone[]).map((z) => ({
-              value: String(z.id),
-              label: z.name,
-            }))}
-          />
-          <FilterMultiSelect
-            name="tipus"
-            label="Tipus"
-            selected={tipus}
-            options={((workTypes ?? []) as WorkType[]).map((t) => ({
-              value: String(t.id),
-              label: t.name,
-            }))}
-          />
-          <FilterMultiSelect
-            name="assignat"
-            label="Assignat a"
-            selected={assignat}
-            options={[
-              ...teams.map((t) => ({
-                value: `team:${t.id}`,
-                label: t.name,
-                group: 'Equips',
-              })),
-              ...assignees.map((p) => ({
-                value: `user:${p.id}`,
-                label: displayName(p),
-                group: 'Persones',
-              })),
-            ]}
-          />
-        </div>
-
-        <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto] sm:items-center">
-          <input
-            name="q"
-            defaultValue={q}
-            className="field"
-            placeholder="Cercar per nom o descripció…"
-            aria-label="Cercar"
-          />
-          <select
-            name="ordre"
-            defaultValue={ordre}
-            className="field truncate"
-            aria-label="Ordenar per"
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.key} value={o.key}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <button type="submit" className="btn btn-secondary">
-            Filtrar
-          </button>
-          {hasFilters && (
-            <Link
-              href={buildHref({ estat: estats })}
-              className="px-2 text-center text-sm font-semibold text-[var(--color-muted)]"
-            >
-              Netejar
-            </Link>
+        {/* En mòbil els filtres s'emportaven mitja pantalla abans de la llista.
+            Es pleguen sencers —selectors, cerca i botó— darrere aquest
+            interruptor, que és només CSS: sense JS ni estat de React. A partir
+            de `sm` es veuen sempre. Comencen desplegats si ja hi ha res marcat,
+            per veure de seguida què s'està filtrant. */}
+        <input
+          type="checkbox"
+          id="mostrar-filtres"
+          defaultChecked={seleccionats > 0}
+          className="peer sr-only sm:hidden"
+        />
+        <label
+          htmlFor="mostrar-filtres"
+          className="flex cursor-pointer items-center gap-1.5 py-1 text-sm font-semibold text-[var(--color-muted)] select-none peer-checked:[&_span:last-child]:rotate-180 sm:hidden"
+        >
+          Filtres
+          {seleccionats > 0 && (
+            <span className="rounded-full bg-[var(--color-brand-soft)] px-2 py-0.5 text-xs text-[var(--color-brand)]">
+              {seleccionats}
+            </span>
           )}
+          {/* El botó ocupa tota l'amplada de la targeta perquè es vegi que és
+              la capçalera del panell i sigui fàcil de prémer amb el dit. */}
+          <span aria-hidden className="ml-auto text-xs transition-transform">
+            ▾
+          </span>
+        </label>
+
+        <div className="hidden space-y-3 peer-checked:block sm:block">
+          <div className="grid items-start gap-3 sm:grid-cols-3">
+            <FilterMultiSelect
+              name="zona"
+              label="Zones"
+              selected={zona}
+              options={((zones ?? []) as Zone[]).map((z) => ({
+                value: String(z.id),
+                label: z.name,
+              }))}
+            />
+            <FilterMultiSelect
+              name="tipus"
+              label="Tipus"
+              selected={tipus}
+              options={((workTypes ?? []) as WorkType[]).map((t) => ({
+                value: String(t.id),
+                label: t.name,
+              }))}
+            />
+            <FilterMultiSelect
+              name="assignat"
+              label="Assignat a"
+              selected={assignat}
+              options={[
+                ...teams.map((t) => ({
+                  value: `team:${t.id}`,
+                  label: t.name,
+                  group: 'Equips',
+                })),
+                ...assignees.map((p) => ({
+                  value: `user:${p.id}`,
+                  label: displayName(p),
+                  group: 'Persones',
+                })),
+              ]}
+            />
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+            <input
+              name="q"
+              defaultValue={q}
+              className="field"
+              placeholder="Cercar per nom o descripció…"
+              aria-label="Cercar"
+            />
+            <button type="submit" className="btn btn-secondary">
+              Filtrar
+            </button>
+            {hasFilters && (
+              <Link
+                href={buildHref({ estat: estats })}
+                className="px-2 text-center text-sm font-semibold text-[var(--color-muted)]"
+              >
+                Netejar
+              </Link>
+            )}
+          </div>
         </div>
       </Form>
 
@@ -195,11 +217,14 @@ export default async function TicketsPage({
         </p>
       )}
 
-      <p className="text-sm text-[var(--color-muted)]">
-        {rows.length} {rows.length === 1 ? 'fitxa' : 'fitxes'}
-        {/* Amb un sol estat present el desglossament només repetiria el total. */}
-        {breakdown.length > 1 && ` · ${breakdown.join(' · ')}`}
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="min-w-0 text-sm text-[var(--color-muted)]">
+          {rows.length} {rows.length === 1 ? 'fitxa' : 'fitxes'}
+          {/* Amb un sol estat present el desglossament només repetiria el total. */}
+          {breakdown.length > 1 && ` · ${breakdown.join(' · ')}`}
+        </p>
+        <SortSelect form="filtres" value={ordre} />
+      </div>
 
       {rows.length === 0 ? (
         <div className="card p-8 text-center text-sm text-[var(--color-muted)]">
