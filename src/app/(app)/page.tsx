@@ -9,10 +9,11 @@ import { TicketList } from './TicketList'
 import { FilterMultiSelect } from './FilterMultiSelect'
 import {
   buildHref,
+  ESTATS,
   hrefFor,
   parseTicketFilters,
   SORT_OPTIONS,
-  TABS,
+  TOTS_ELS_ESTATS,
   ticketListQuery,
 } from './ticket-filters'
 import type { Profile, TicketListRow, WorkType, Zone } from '@/lib/types'
@@ -23,7 +24,7 @@ export default async function TicketsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const filters = parseTicketFilters(await searchParams)
-  const { tab, zona, tipus, assignat, q, ordre } = filters
+  const { estats, zona, tipus, assignat, q, ordre } = filters
 
   const profile = await getCurrentProfile()
   const supabase = await createClient()
@@ -51,6 +52,14 @@ export default async function TicketsPage({
   const hasFilters =
     zona.length > 0 || tipus.length > 0 || assignat.length > 0 || q !== '' || ordre !== 'updated_desc'
 
+  const totsMarcats = estats.length === TOTS_ELS_ESTATS.length
+  // Els estats es marquen i es desmarquen un a un; desmarcar l'últim que
+  // queda equival a «Tots», que és més útil que quedar-se sense cap fitxa.
+  const chipClass = (actiu: boolean) =>
+    `rounded-full px-3.5 py-1.5 text-sm font-semibold whitespace-nowrap ${
+      actiu ? 'bg-[var(--color-brand)] text-white' : 'card text-[var(--color-muted)]'
+    }`
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -71,23 +80,42 @@ export default async function TicketsPage({
       </div>
 
       <nav className="flex gap-1.5 overflow-x-auto">
-        {TABS.map(({ key, label }) => (
-          <Link
-            key={key}
-            href={buildHref({ estat: key, zona, tipus, assignat, q, ordre })}
-            className={`rounded-full px-3.5 py-1.5 text-sm font-semibold whitespace-nowrap ${
-              tab === key
-                ? 'bg-[var(--color-brand)] text-white'
-                : 'card text-[var(--color-muted)]'
-            }`}
-          >
-            {label}
-          </Link>
-        ))}
+        {ESTATS.map(({ key, label }) => {
+          const actiu = !totsMarcats && estats.includes(key)
+          const seguent = actiu
+            ? estats.filter((e) => e !== key)
+            : TOTS_ELS_ESTATS.filter((e) => e === key || (!totsMarcats && estats.includes(e)))
+          return (
+            <Link
+              key={key}
+              href={buildHref({
+                estat: seguent.length > 0 ? seguent : TOTS_ELS_ESTATS,
+                zona,
+                tipus,
+                assignat,
+                q,
+                ordre,
+              })}
+              aria-pressed={actiu}
+              className={chipClass(actiu)}
+            >
+              {label}
+            </Link>
+          )
+        })}
+        <Link
+          href={buildHref({ estat: TOTS_ELS_ESTATS, zona, tipus, assignat, q, ordre })}
+          aria-pressed={totsMarcats}
+          className={chipClass(totsMarcats)}
+        >
+          Tots
+        </Link>
       </nav>
 
       <Form action="/" className="card space-y-3 p-3">
-        <input type="hidden" name="estat" value={tab} />
+        {estats.map((e) => (
+          <input key={e} type="hidden" name="estat" value={e} />
+        ))}
 
         <div className="grid items-start gap-3 sm:grid-cols-3">
           <FilterMultiSelect
@@ -152,7 +180,7 @@ export default async function TicketsPage({
           </button>
           {hasFilters && (
             <Link
-              href={buildHref({ estat: tab })}
+              href={buildHref({ estat: estats })}
               className="px-2 text-center text-sm font-semibold text-[var(--color-muted)]"
             >
               Netejar
@@ -169,7 +197,8 @@ export default async function TicketsPage({
 
       <p className="text-sm text-[var(--color-muted)]">
         {rows.length} {rows.length === 1 ? 'fitxa' : 'fitxes'}
-        {tab !== 'resolts' && tab !== 'a_revisar' && breakdown.length > 0 && ` · ${breakdown.join(' · ')}`}
+        {/* Amb un sol estat present el desglossament només repetiria el total. */}
+        {breakdown.length > 1 && ` · ${breakdown.join(' · ')}`}
       </p>
 
       {rows.length === 0 ? (

@@ -7,16 +7,22 @@ import type { SupabaseClient } from '@supabase/supabase-js'
  * Zona, tipus i assignat accepten diversos valors (multiselect): la llista de
  * buida vol dir "tots", i si n'hi ha uns quants es filtra per qualsevol d'ells. */
 
-export type Tab = 'pendents' | 'a_revisar' | 'resolts' | 'tots'
+export type Estat = 'pendents' | 'per_validar' | 'resolts'
 
-// Les pestanyes són excloents: una fitxa «A revisar» no surt a «Pendents»,
-// perquè l'estat de la base de dades ja és un valor a part.
-export const TABS: { key: Tab; label: string }[] = [
+// Els tres grups reparteixen totes les fitxes sense solapar-se, i se'n poden
+// marcar uns quants alhora (marcar-los tots és el mateix que no filtrar):
+//
+//   Pendents     la feina encara s'ha de fer: el responsable no ha marcat que
+//                estigui feta, o el tècnic/propietari han demanat revisió
+//   Per validar  el responsable l'ha marcada feta i falten aprovacions
+//   Resolts      les tres aprovacions fetes
+export const ESTATS: { key: Estat; label: string }[] = [
   { key: 'pendents', label: 'Pendents' },
-  { key: 'a_revisar', label: 'A revisar' },
+  { key: 'per_validar', label: 'Per validar' },
   { key: 'resolts', label: 'Resolts' },
-  { key: 'tots', label: 'Tots' },
 ]
+
+export const TOTS_ELS_ESTATS: Estat[] = ESTATS.map((e) => e.key)
 
 export type SortKey =
   | 'updated_desc'
@@ -38,7 +44,8 @@ export const SORT_OPTIONS: { key: SortKey; label: string; column: string; ascend
 ]
 
 export interface TicketFilters {
-  tab: Tab
+  /** Mai buit: sense res marcat es mostren tots els estats. */
+  estats: Estat[]
   zona: string[]
   tipus: string[]
   /** Valors "user:<uuid>" i/o "team:<id>". */
@@ -63,10 +70,17 @@ export function parseTicketFilters(sp: SearchParams): TicketFilters {
       .map((v) => v.trim())
       .filter(Boolean)
   }
-  const estat = one('estat') as Tab | undefined
+  // «tots» i «a_revisar» són els valors de les pestanyes d'abans, que encara
+  // poden arribar en enllaços guardats.
+  const estats = many('estat').flatMap((e): Estat[] => {
+    if (e === 'tots') return TOTS_ELS_ESTATS
+    if (e === 'a_revisar') return ['pendents']
+    return ESTATS.some((x) => x.key === e) ? [e as Estat] : []
+  })
+  const unics = TOTS_ELS_ESTATS.filter((e) => estats.includes(e))
 
   return {
-    tab: estat && TABS.some((t) => t.key === estat) ? estat : 'pendents',
+    estats: unics.length > 0 ? unics : ['pendents'],
     zona: many('zona'),
     tipus: many('tipus'),
     assignat: many('assignat'),
@@ -95,7 +109,7 @@ export function buildHref(
 
 export function hrefFor(f: TicketFilters, path = '/'): string {
   return buildHref(
-    { estat: f.tab, zona: f.zona, tipus: f.tipus, assignat: f.assignat, q: f.q, ordre: f.ordre },
+    { estat: f.estats, zona: f.zona, tipus: f.tipus, assignat: f.assignat, q: f.q, ordre: f.ordre },
     path,
   )
 }
@@ -110,9 +124,25 @@ export function ticketListQuery(supabase: SupabaseClient<any>, f: TicketFilters)
     .select('*')
     .order(sort.column, { ascending: sort.ascending, nullsFirst: false })
 
-  if (f.tab === 'pendents') query = query.in('status', ['obert', 'solucio_acordada'])
-  if (f.tab === 'a_revisar') query = query.eq('status', 'a_revisar')
-  if (f.tab === 'resolts') query = query.eq('status', 'resolt')
+  // L'estat de la base de dades no serveix tal qual: «obert» i
+  // «solucio_acordada» tant poden ser pendents com per validar, i el que ho
+  // decideix és si el responsable ha marcat la feina com a feta. Amb els tres
+  // grups marcats no cal filtrar res, perquè es reparteixen totes les fitxes.
+  if (f.estats.length < TOTS_ELS_ESTATS.length) {
+    const branques: string[] = []
+    // «Pendents» inclou les fitxes a revisar: la feina es dona per no feta.
+    if (f.estats.includes('pendents')) {
+      branques.push('approved_responsable_at.is.null', 'status.eq.a_revisar')
+    }
+    if (f.estats.includes('per_validar')) {
+      branques.push(
+        'and(approved_responsable_at.not.is.null,status.in.(obert,solucio_acordada))',
+      )
+    }
+    if (f.estats.includes('resolts')) branques.push('status.eq.resolt')
+    query = query.or(branques.join(','))
+  }
+
   if (f.zona.length > 0) query = query.in('zone_id', f.zona.map(Number))
   if (f.tipus.length > 0) query = query.in('work_type_id', f.tipus.map(Number))
 
@@ -146,7 +176,13 @@ export function describeFilters(
   typeNames: string[],
   assigneeNames: string[],
 ): string {
-  const parts = [TABS.find((t) => t.key === f.tab)!.label]
+  const parts = [
+    f.estats.length === TOTS_ELS_ESTATS.length
+      ? 'Tots'
+      : ESTATS.filter((e) => f.estats.includes(e.key))
+          .map((e) => e.label)
+          .join(' + '),
+  ]
   if (zoneNames.length > 0) {
     parts.push(`${zoneNames.length === 1 ? 'Zona' : 'Zones'}: ${zoneNames.join(', ')}`)
   }
