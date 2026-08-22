@@ -4,8 +4,8 @@ import { PendingProvider } from '@/components/PendingOverlay'
 import { NavigationPendingListener } from '@/components/NavigationPendingListener'
 
 export const metadata: Metadata = {
-  title: 'Seguiment Mirasol',
-  description: 'Seguiment de tasques pendents de la construcció de l’habitatge',
+  title: 'Seguiment d’obres',
+  description: 'Seguiment de les tasques pendents de cada obra',
 }
 
 export const viewport: Viewport = {

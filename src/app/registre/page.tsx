@@ -7,7 +7,7 @@ export default function RegistrePage() {
         <h1 className="text-2xl font-bold tracking-tight">Crear un compte</h1>
         <p className="mt-1 text-sm text-[var(--color-muted)]">
           L’app és per invitació: només pots registrar-te si l’administrador ha autoritzat
-          prèviament el teu correu. El rol te’l dona la invitació.
+          prèviament el teu correu. La invitació ja porta a quins projectes tindràs accés.
         </p>
       </div>
       <div className="card p-5">
