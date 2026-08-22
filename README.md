@@ -167,19 +167,24 @@ pas 3 va tot dins d'una transacció.
 
 ## Desplegament a Vercel
 
-Aquesta branca es desplega com un **projecte de Vercel a part**, per tenir la
-seva URL i les seves variables d'entorn sense tocar la producció de `main`:
+Aquesta branca es desplega com un **projecte de Vercel a part**, `seguiment-obres`,
+per tenir la seva URL i les seves variables d'entorn sense tocar la producció de
+`main`. El projecte ja està creat, connectat a aquest repositori i amb el preset
+de Next.js. Queda per fer, al dashboard de Vercel:
 
-1. A Vercel, *Add New → Project* i importa el mateix repositori de GitHub.
-2. Posa-li un nom diferent (p. ex. `seguiment-obres`).
-3. A **Settings → Git → Production Branch**, canvia `main` per `multiprojecte`.
-4. Afegeix les dues variables d'entorn (`NEXT_PUBLIC_SUPABASE_URL` i
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`) amb les del projecte de Supabase NOU.
-5. A Supabase, **Authentication → URL Configuration**, posa el domini nou com a
+1. **Settings → Git → Production Branch**: canvia `main` per `multiprojecte`.
+   Mentre no es faci, el que es desplega a producció d'aquest projecte és `main`.
+2. **Settings → Environment Variables**: `NEXT_PUBLIC_SUPABASE_URL` i
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY` amb els valors del projecte de Supabase NOU.
+3. A Supabase, **Authentication → URL Configuration**, posa el domini nou com a
    *Site URL* perquè els correus de confirmació apuntin bé.
 
-El projecte de Vercel de `main` no es toca: continua desplegant `main` amb la
-seva base de dades.
+El projecte de Vercel de `main` (`seguiment_mirasol`) no es toca: continua
+desplegant `main` amb la seva base de dades. Com que els dos projectes miren el
+mateix repositori, en pujar commits a `multiprojecte` també en generarà un
+*preview* — que no serveix de res, perquè apuntaria a la base de dades antiga.
+Es pot deixar estar o silenciar-lo des de **Settings → Git → Ignored Build Step**
+del projecte vell.
 
 ## Estructura
 
