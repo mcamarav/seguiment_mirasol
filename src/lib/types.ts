@@ -23,11 +23,13 @@ export interface Profile {
   created_at: string
 }
 
-/** Una obra. El `slug` és el que surt a la URL: /p/mirasol. */
+/** Una obra. El `slug` és el que surt a la URL: /p/mirasol.
+ * `image_path` és la foto de portada dins del bucket `project-images`. */
 export interface Project {
   id: number
   slug: string
   name: string
+  image_path: string | null
   active: boolean
   created_at: string
 }

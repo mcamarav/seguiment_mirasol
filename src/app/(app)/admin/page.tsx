@@ -35,7 +35,7 @@ export default async function AdminPage() {
     { data: memberRows },
     { data: ticketRows },
   ] = await Promise.all([
-    supabase.from('projects').select('id, slug, name, active, created_at').order('name'),
+    supabase.from('projects').select('id, slug, name, image_path, active, created_at').order('name'),
     supabase.from('profiles').select('id, email, full_name, is_admin, created_at').order('created_at'),
     supabase.from('invitations').select('*').order('created_at'),
     supabase.from('invitation_projects').select('email, project_id'),

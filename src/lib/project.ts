@@ -1,5 +1,6 @@
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
 import { accessFor, type Access } from '@/lib/permissions'
+import { PROJECT_PHOTO_BUCKET, PROJECT_PHOTO_TTL } from '@/lib/project-photo'
 import { buildTeamContext, toTeamsWithMembers, type TeamContext } from '@/lib/teams'
 import { displayName } from '@/lib/format'
 import type { Profile, Project, ProjectMember, TeamWithMembers } from '@/lib/types'
@@ -29,7 +30,7 @@ export async function loadProjectContext(slug: string): Promise<ProjectContext |
   const supabase = await createClient()
   const { data: project } = await supabase
     .from('projects')
-    .select('id, slug, name, active, created_at')
+    .select('id, slug, name, image_path, active, created_at')
     .eq('slug', slug)
     .maybeSingle()
   if (!project) return null
@@ -85,7 +86,34 @@ export async function listMyProjects(): Promise<Project[]> {
   const supabase = await createClient()
   const { data } = await supabase
     .from('projects')
-    .select('id, slug, name, active, created_at')
+    .select('id, slug, name, image_path, active, created_at')
     .order('name')
   return (data ?? []) as Project[]
+}
+
+/** Signa les fotos de portada de tots aquests projectes d'un sol cop (el bucket
+ * és privat). Retorna un mapa id de projecte -> URL; els que no tenen foto —o
+ * els que la tenen trencada— simplement no hi surten. */
+export async function signProjectPhotos(projects: Project[]): Promise<Map<number, string>> {
+  const withPhoto = projects.filter((p) => p.image_path)
+  const urls = new Map<number, string>()
+  if (withPhoto.length === 0) return urls
+
+  const supabase = await createClient()
+  const { data } = await supabase.storage
+    .from(PROJECT_PHOTO_BUCKET)
+    .createSignedUrls(
+      withPhoto.map((p) => p.image_path as string),
+      PROJECT_PHOTO_TTL,
+    )
+
+  const byPath = new Map<string, string>()
+  for (const entry of data ?? []) {
+    if (entry.path && entry.signedUrl) byPath.set(entry.path, entry.signedUrl)
+  }
+  for (const p of withPhoto) {
+    const url = byPath.get(p.image_path as string)
+    if (url) urls.set(p.id, url)
+  }
+  return urls
 }

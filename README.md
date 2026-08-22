@@ -14,6 +14,10 @@ obres alhora**, cada una amb la seva gent. Next.js (App Router) + Supabase
 - **Projectes** (obres). Cada projecte té les seves fitxes, les seves zones i
   tipus, els seus equips i la seva numeració (`#001` dins de cada obra). La URL
   el porta al davant: `/p/mirasol`, `/p/casa-del-pi`.
+- **Llista de projectes** a la pantalla d'inici (`/`): les obres a les quals
+  tens accés, amb la **foto de portada** de cada una i quantes fitxes hi ha
+  pendents. Des d'aquí l'administrador crea projectes nous —amb foto i tot— i
+  qui administra una obra li canvia la foto.
 - **Accés per projecte**: una persona veu els projectes on té accés i prou. Qui
   no és membre d'un projecte no en veu res — ni les fitxes, ni les zones, ni la
   llista de qui hi treballa. Es reparteix a l'administració de cada projecte.
@@ -89,8 +93,13 @@ compatible amb el de la branca `main` (les taules porten `project_id`).
 3. A **Authentication → Providers → Email**, comprova que *Email* està actiu.
 
 > Si l'SQL falla al tros de `storage.objects` per manca de permisos, crea les
-> tres polítiques del *bucket* `ticket-images` des de **Storage → Policies**
-> amb els mateixos criteris que hi ha al fitxer.
+> polítiques dels *buckets* `ticket-images` i `project-images` des de
+> **Storage → Policies** amb els mateixos criteris que hi ha al fitxer.
+
+> **Si la base de dades ja existia** (l'esquema multiprojecte ja executat abans
+> de les fotos de portada), no cal tornar a passar `schema.sql`: executa només
+> [`supabase/afegeix_foto_projectes.sql`](supabase/afegeix_foto_projectes.sql),
+> que afegeix la columna `projects.image_path` i el *bucket* `project-images`.
 
 ### 2. Configurar l'app
 
@@ -189,14 +198,16 @@ del projecte vell.
 ## Estructura
 
 ```
-supabase/schema.sql            Esquema, RLS, triggers, bucket i dades inicials
+supabase/schema.sql            Esquema, RLS, triggers, buckets i dades inicials
+supabase/afegeix_foto_projectes.sql  Actualització: foto de portada dels projectes
 supabase/migracio/             Migració des de la versió d'una sola obra
 src/middleware.ts              Refresc de sessió i protecció de rutes
 src/lib/project.ts             Càrrega del projecte i dels permisos de dins
 src/lib/permissions.ts         Qui pot què (sempre dins d'un projecte)
 src/lib/routes.ts              /p/<obra>/… (també des del client)
 src/app/entrar, /registre      Autenticació (registre només per invitació)
-src/app/(app)/page.tsx         Selector de projectes
+src/app/(app)/page.tsx         Llista de projectes (amb foto i projecte nou)
+src/app/(app)/project-actions.ts  Crear, amagar, esborrar i posar foto a un projecte
 src/app/(app)/admin/           Projectes, convidats i comptes (administració general)
 src/app/(app)/p/[projecte]/    Tot el que és de dins d'una obra:
   page.tsx                       llistat de fitxes amb filtres
@@ -210,6 +221,10 @@ src/app/(app)/p/[projecte]/    Tot el que és de dins d'una obra:
   reduïdes a 1600 px de costat màxim per no cremar dades al mòbil. El *bucket*
   és privat; les fitxes les mostren amb URLs signades d'una hora. El camí sempre
   comença per l'id **global** de la fitxa, no pel número que es mostra.
+- Les fotos de portada van a part, al *bucket* privat `project-images`, i el seu
+  camí comença per l'id del projecte: la mira qui té accés a l'obra i només la
+  canvia qui l'administra. Es guarda una sola foto per projecte; en canviar-la,
+  l'anterior s'esborra del *bucket*.
 - Les aprovacions i les peticions de revisió **es reinicien** (trigger
   `reset_approvals_on_edit`) si algú edita la fitxa després que ja s'hagin
   donat: cal tornar a passar el circuit per a la versió nova.

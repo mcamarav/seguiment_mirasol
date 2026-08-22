@@ -3,12 +3,11 @@
 import { revalidatePath } from 'next/cache'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
 import { isAdmin } from '@/lib/permissions'
-import { slugify } from '@/lib/routes'
 import type { Profile } from '@/lib/types'
 
-/** Aquesta pantalla és de l'administrador de la instal·lació: projectes, comptes
- * i invitacions. Els permisos de dins de cada projecte es reparteixen a
- * /p/[projecte]/admin. */
+/** Aquesta pantalla és de l'administrador de la instal·lació: comptes i
+ * invitacions (els projectes en si són a `../project-actions`). Els permisos de
+ * dins de cada projecte es reparteixen a /p/[projecte]/admin. */
 async function requireAdmin(): Promise<Profile> {
   const profile = await getCurrentProfile()
   if (!profile || !isAdmin(profile)) throw new Error('Cal ser administrador.')
@@ -18,78 +17,6 @@ async function requireAdmin(): Promise<Profile> {
 function refresh(): void {
   revalidatePath('/admin')
   revalidatePath('/', 'layout')
-}
-
-// -----------------------------------------------------------------------------
-// Projectes
-// -----------------------------------------------------------------------------
-
-/** Crea un projecte i li sembra les zones i els tipus per defecte. El slug surt
- * del nom i és el que quedarà a la URL per sempre. */
-export async function createProject(formData: FormData): Promise<void> {
-  await requireAdmin()
-
-  const name = String(formData.get('name') ?? '').trim()
-  if (!name) return
-
-  const base = slugify(String(formData.get('slug') ?? '') || name)
-  if (!base) return
-
-  const supabase = await createClient()
-
-  // Si el slug ja existeix se li posa un sufix: -2, -3…
-  const { data: taken } = await supabase.from('projects').select('slug').like('slug', `${base}%`)
-  const used = new Set(((taken ?? []) as { slug: string }[]).map((p) => p.slug))
-  let slug = base
-  for (let i = 2; used.has(slug); i += 1) slug = `${base}-${i}`
-
-  const { data, error } = await supabase
-    .from('projects')
-    .insert({ slug, name })
-    .select('id')
-    .single()
-
-  if (error || !data) return
-
-  await supabase.rpc('seed_project_catalogs', { p_project_id: data.id })
-
-  refresh()
-}
-
-/** Amaga o recupera un projecte: deixa de sortir al selector, però no s'esborra
- * res i qui hi tenia accés hi pot continuar entrant per l'enllaç. */
-export async function setProjectActive(formData: FormData): Promise<void> {
-  await requireAdmin()
-
-  const id = Number(formData.get('id'))
-  const active = String(formData.get('active')) === 'true'
-  if (!id) return
-
-  const supabase = await createClient()
-  await supabase.from('projects').update({ active: !active }).eq('id', id)
-
-  refresh()
-}
-
-/** Esborra un projecte, i només si està buit: amb fitxes a dins s'ho enduria tot
- * (comentaris i imatges inclosos) i no hi ha manera de desfer-ho. */
-export async function deleteProject(formData: FormData): Promise<void> {
-  await requireAdmin()
-
-  const id = Number(formData.get('id'))
-  if (!id) return
-
-  const supabase = await createClient()
-  const { count } = await supabase
-    .from('tickets')
-    .select('id', { count: 'exact', head: true })
-    .eq('project_id', id)
-
-  if ((count ?? 0) > 0) return
-
-  await supabase.from('projects').delete().eq('id', id)
-
-  refresh()
 }
 
 // -----------------------------------------------------------------------------

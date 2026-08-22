@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { formatDate } from '@/lib/format'
 import { projectPath } from '@/lib/routes'
-import { createProject, deleteProject, setProjectActive } from './actions'
+import { deleteProject, setProjectActive } from '../project-actions'
+import { NewProjectForm } from '../NewProjectForm'
 import { SubmitButton } from '@/components/SubmitButton'
 import type { Project } from '@/lib/types'
 
@@ -21,21 +22,17 @@ export function ProjectsPanel({
       <h2 className="font-semibold">Projectes</h2>
       <p className="mt-1 text-xs text-[var(--color-muted)]">
         Cada projecte té les seves fitxes, zones, tipus i equips, i la seva pròpia llista de qui
-        hi té accés. L’adreça surt del nom i no canvia després: <code>/p/mirasol</code>.
+        hi té accés. L’adreça surt del nom i no canvia després: <code>/p/mirasol</code>. La foto
+        de portada es posa a la{' '}
+        <Link href="/" className="font-semibold text-[var(--color-brand)]">
+          llista de projectes
+        </Link>
+        .
       </p>
 
-      <form action={createProject} className="mt-3 grid gap-2 sm:grid-cols-[1.4fr_1fr_auto]">
-        <input name="name" required className="field" placeholder="Nom del projecte nou…" />
-        <input
-          name="slug"
-          className="field"
-          placeholder="adreça (opcional)"
-          aria-label="Adreça del projecte"
-        />
-        <SubmitButton className="btn btn-primary shrink-0" pendingLabel="Creant…">
-          Crear projecte
-        </SubmitButton>
-      </form>
+      <div className="mt-3">
+        <NewProjectForm />
+      </div>
 
       <ul className="mt-4 divide-y divide-[var(--color-line)]">
         {projects.map((project) => {

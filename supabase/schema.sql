@@ -44,12 +44,16 @@ $$;
 -- Projectes (les obres que es fan servir)
 --
 -- El `slug` és el que surt a la URL: /p/mirasol. Amagar un projecte
--- (active = false) el treu del selector sense esborrar-ne res.
+-- (active = false) el treu del selector sense esborrar-ne res. La foto de
+-- portada (`image_path`) és opcional i viu al bucket `project-images`.
 -- -----------------------------------------------------------------------------
 create table if not exists public.projects (
   id         bigint generated always as identity primary key,
   slug       text not null unique check (slug ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'),
   name       text not null,
+  -- Foto de portada, per reconèixer l'obra d'un cop d'ull al selector. És el
+  -- camí dins del bucket `project-images`; null vol dir que no en té.
+  image_path text,
   active     boolean not null default true,
   created_by uuid references public.profiles(id) on delete set null default auth.uid(),
   created_at timestamptz not null default now()
@@ -1042,6 +1046,32 @@ create policy ticket_images_delete on storage.objects
     owner = auth.uid()
     or public.can_edit_ticket((split_part(name, '/', 1))::bigint)
   ));
+
+-- -----------------------------------------------------------------------------
+-- Storage: foto de portada dels projectes (mateix bucket privat per a tots, un
+-- fitxer per projecte). El camí comença per l'id del projecte
+-- ("{project_id}/..."), així la RLS sap de quin projecte és cada fitxer: la
+-- veu qui hi té accés i només la canvia qui l'administra.
+-- -----------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('project-images','project-images', false)
+on conflict (id) do nothing;
+
+drop policy if exists project_images_select on storage.objects;
+drop policy if exists project_images_insert on storage.objects;
+drop policy if exists project_images_delete on storage.objects;
+create policy project_images_select on storage.objects
+  for select to authenticated
+  using (bucket_id = 'project-images' and name ~ '^[0-9]+/'
+    and public.is_project_member((split_part(name, '/', 1))::bigint));
+create policy project_images_insert on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'project-images' and name ~ '^[0-9]+/'
+    and public.is_project_manager((split_part(name, '/', 1))::bigint));
+create policy project_images_delete on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'project-images' and name ~ '^[0-9]+/'
+    and public.is_project_manager((split_part(name, '/', 1))::bigint));
 
 
 -- -----------------------------------------------------------------------------
