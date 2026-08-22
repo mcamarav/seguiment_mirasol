@@ -1,80 +1,158 @@
 -- =============================================================================
--- Seguiment Mirasol — esquema complet de Supabase
--- Executa aquest fitxer sencer a l'SQL Editor del teu projecte Supabase.
--- És idempotent en la mesura del possible: es pot tornar a executar sobre una
--- base de dades neta sense problemes.
+-- Seguiment d'obres — esquema complet de Supabase (versió multiprojecte)
+--
+-- Executa aquest fitxer sencer a l'SQL Editor d'un projecte de Supabase NOU.
+-- És la versió multiprojecte: totes les dades (fitxes, zones, tipus, equips)
+-- pengen d'un projecte (`public.projects`) i cada persona té accés — o no — a
+-- cada projecte per separat, amb els seus permisos i els seus equips dins de
+-- cada un.
+--
+-- Diferències respecte de la versió d'un sol projecte:
+--   · profiles només guarda `is_admin` (administrador de la instal·lació).
+--     Els permisos de fitxes (crear, editar-ho tot) són per projecte i viuen a
+--     `project_members`.
+--   · teams, zones, work_types i tickets porten `project_id`.
+--   · les fitxes es numeren per projecte (`tickets.ref`): #001 de cada obra.
+--   · qui no és membre d'un projecte no en veu absolutament res (RLS).
 -- =============================================================================
 
 create extension if not exists pgcrypto;
 
 -- -----------------------------------------------------------------------------
--- Permisos d'usuari (independents dels equips)
---   is_admin      -> ho pot fer tot: crear, editar i esborrar qualsevol fitxa,
---                    aprovar en nom de qualsevol equip, gestionar equips i usuaris
---   can_create    -> pot crear fitxes noves
---   can_edit_all  -> pot editar qualsevol fitxa (no només les que ha creat)
--- Qui crea una fitxa sempre la pot editar, encara que no tingui can_edit_all.
+-- Perfils
+--
+-- `is_admin` és l'únic permís global que queda: l'administrador de la
+-- instal·lació. Ho pot fer tot a tots els projectes, crea projectes, convida
+-- gent i reparteix accessos. Tota la resta de permisos són per projecte.
 -- -----------------------------------------------------------------------------
 create table if not exists public.profiles (
-  id           uuid primary key references auth.users(id) on delete cascade,
-  email        text not null,
-  full_name    text,
-  is_admin     boolean not null default false,
-  can_create   boolean not null default false,
-  can_edit_all boolean not null default false,
-  created_at   timestamptz not null default now()
+  id         uuid primary key references auth.users(id) on delete cascade,
+  email      text not null,
+  full_name  text,
+  is_admin   boolean not null default false,
+  created_at timestamptz not null default now()
 );
 
--- Compatibilitat amb bases de dades creades abans de separar equip i rol.
-alter table public.profiles add column if not exists is_admin     boolean not null default false;
-alter table public.profiles add column if not exists can_create   boolean not null default false;
-alter table public.profiles add column if not exists can_edit_all boolean not null default false;
-
-do $$ begin
-  if exists (
-    select 1 from information_schema.columns
-    where table_schema = 'public' and table_name = 'profiles' and column_name = 'role'
-  ) then
-    update public.profiles set is_admin = true where role::text = 'admin';
-    alter table public.profiles drop column role;
-  end if;
-end $$;
-
--- Helpers de permisos. SECURITY DEFINER per evitar recursió d'RLS.
+-- Administrador de la instal·lació. SECURITY DEFINER per evitar recursió d'RLS.
 create or replace function public.is_admin()
 returns boolean
 language sql stable security definer set search_path = public as $$
   select coalesce((select p.is_admin from public.profiles p where p.id = auth.uid()), false);
 $$;
 
-create or replace function public.can_create()
+-- -----------------------------------------------------------------------------
+-- Projectes (les obres que es fan servir)
+--
+-- El `slug` és el que surt a la URL: /p/mirasol. Amagar un projecte
+-- (active = false) el treu del selector sense esborrar-ne res.
+-- -----------------------------------------------------------------------------
+create table if not exists public.projects (
+  id         bigint generated always as identity primary key,
+  slug       text not null unique check (slug ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'),
+  name       text not null,
+  active     boolean not null default true,
+  created_by uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at timestamptz not null default now()
+);
+
+-- -----------------------------------------------------------------------------
+-- Accés als projectes
+--
+-- Una fila per persona i projecte: si no hi ha fila, no hi té accés i no en veu
+-- res. Els permisos són els que abans eren globals, ara per projecte:
+--   is_manager   -> administra aquest projecte (membres, equips, zones i tipus),
+--                   i pot aprovar en nom de qualsevol actor dins d'ell
+--   can_create   -> pot crear fitxes noves en aquest projecte
+--   can_edit_all -> pot editar qualsevol fitxa del projecte (no només les seves)
+-- Qui crea una fitxa sempre la pot editar, encara que no tingui can_edit_all.
+-- -----------------------------------------------------------------------------
+create table if not exists public.project_members (
+  project_id   bigint  not null references public.projects(id) on delete cascade,
+  user_id      uuid    not null references public.profiles(id) on delete cascade,
+  is_manager   boolean not null default false,
+  can_create   boolean not null default false,
+  can_edit_all boolean not null default false,
+  created_at   timestamptz not null default now(),
+  primary key (project_id, user_id)
+);
+create index if not exists project_members_user_idx on public.project_members(user_id);
+
+-- Helpers de permisos per projecte. Tots donen per bo l'administrador de la
+-- instal·lació, així no cal repetir-ho a cada policy.
+create or replace function public.is_project_member(p_project_id bigint)
 returns boolean
 language sql stable security definer set search_path = public as $$
-  select coalesce(
-    (select p.is_admin or p.can_create from public.profiles p where p.id = auth.uid()), false);
+  select public.is_admin() or exists (
+    select 1 from public.project_members m
+    where m.project_id = p_project_id and m.user_id = auth.uid()
+  );
+$$;
+
+create or replace function public.is_project_manager(p_project_id bigint)
+returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_admin() or exists (
+    select 1 from public.project_members m
+    where m.project_id = p_project_id and m.user_id = auth.uid() and m.is_manager
+  );
+$$;
+
+create or replace function public.can_create_in(p_project_id bigint)
+returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_admin() or exists (
+    select 1 from public.project_members m
+    where m.project_id = p_project_id and m.user_id = auth.uid()
+      and (m.is_manager or m.can_create)
+  );
+$$;
+
+create or replace function public.can_edit_all_in(p_project_id bigint)
+returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_admin() or exists (
+    select 1 from public.project_members m
+    where m.project_id = p_project_id and m.user_id = auth.uid()
+      and (m.is_manager or m.can_edit_all)
+  );
+$$;
+
+-- Comparteixen algun projecte? És el que decideix quins perfils es veuen: la
+-- llista de gent no ha de sortir del projecte.
+create or replace function public.shares_project(p_user_id uuid)
+returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1
+      from public.project_members mine
+      join public.project_members other on other.project_id = mine.project_id
+     where mine.user_id = auth.uid() and other.user_id = p_user_id
+  );
 $$;
 
 -- -----------------------------------------------------------------------------
--- Equips: grups d'usuaris lliures (els crea i gestiona un admin). Una persona
--- pot pertànyer a diversos equips.
+-- Equips: grups d'usuaris DINS d'un projecte (els gestiona qui l'administra).
+-- Una persona pot pertànyer a diversos equips del mateix projecte i tenir
+-- equips diferents a cada projecte.
 --
--- Un equip pot tenir un "rol global" (tecnics / propietaris): els membres
--- d'aquell equip poden aprovar la casella corresponent i veure/comentar
--- TOTES les fitxes, no només les que tenen assignades. Com a molt un equip
--- pot tenir cada rol global (teams_global_role_unique).
+-- Un equip pot tenir un "rol global" dins del seu projecte (tecnics /
+-- propietaris): els seus membres aproven la casella corresponent i veuen i
+-- comenten TOTES les fitxes d'aquell projecte, no només les assignades. Com a
+-- molt un equip per projecte pot tenir cada rol global.
 --
--- La casella "Responsable" no té equip global fix: l'aprova qui tingui la
--- fitxa assignada (una persona o un equip sencer, camp assignee_id /
--- assignee_team_id de tickets).
+-- La casella "Responsable" no té equip fix: l'aprova qui tingui la fitxa
+-- assignada (assignee_id / assignee_team_id).
 -- -----------------------------------------------------------------------------
 create table if not exists public.teams (
   id          bigint generated always as identity primary key,
-  name        text not null unique,
+  project_id  bigint not null references public.projects(id) on delete cascade,
+  name        text not null,
   global_role text check (global_role in ('tecnics','propietaris')),
-  created_at  timestamptz not null default now()
+  created_at  timestamptz not null default now(),
+  unique (project_id, name)
 );
-create unique index if not exists teams_global_role_unique
-  on public.teams(global_role) where global_role is not null;
+create unique index if not exists teams_project_global_role_unique
+  on public.teams(project_id, global_role) where global_role is not null;
 
 create table if not exists public.team_members (
   team_id    bigint not null references public.teams(id) on delete cascade,
@@ -84,22 +162,23 @@ create table if not exists public.team_members (
 );
 create index if not exists team_members_user_idx on public.team_members(user_id);
 
--- Membre d'un equip amb aquest rol global ('tecnics' o 'propietaris').
-create or replace function public.is_global_team_member(p_global_role text)
+-- Membre de l'equip amb aquest rol global en aquest projecte.
+create or replace function public.is_global_team_member(p_project_id bigint, p_global_role text)
 returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from public.team_members tm
     join public.teams t on t.id = tm.team_id
-    where tm.user_id = auth.uid() and t.global_role = p_global_role
+    where tm.user_id = auth.uid()
+      and t.project_id = p_project_id
+      and t.global_role = p_global_role
   );
 $$;
 
 -- -----------------------------------------------------------------------------
 -- Convidats: NOMÉS es pot registrar qui tingui el correu autoritzat aquí.
--- La invitació ja no porta cap rol de fitxa (això ara és cosa dels equips,
--- que s'assignen des de /admin un cop la persona s'ha registrat); només marca
--- si la persona ha de començar sent administradora.
+-- La invitació és a la instal·lació, i pot portar pre-assignats els projectes
+-- (amb els permisos de cada un) i els equips que se li donaran en registrar-se.
 -- -----------------------------------------------------------------------------
 create table if not exists public.invitations (
   email       text primary key,
@@ -111,24 +190,19 @@ create table if not exists public.invitations (
   accepted_by uuid references public.profiles(id) on delete set null
 );
 
-alter table public.invitations add column if not exists is_admin boolean not null default false;
+-- Projectes (i permisos dins de cada un) que se li donaran quan la invitació
+-- s'accepti. Es pot editar mentre estigui pendent; un cop acceptada,
+-- handle_new_user() converteix aquestes files en project_members i les esborra.
+create table if not exists public.invitation_projects (
+  email        text    not null references public.invitations(email) on delete cascade,
+  project_id   bigint  not null references public.projects(id) on delete cascade,
+  is_manager   boolean not null default false,
+  can_create   boolean not null default false,
+  can_edit_all boolean not null default false,
+  primary key (email, project_id)
+);
 
-do $$ begin
-  if exists (
-    select 1 from information_schema.columns
-    where table_schema = 'public' and table_name = 'invitations' and column_name = 'role'
-  ) then
-    update public.invitations set is_admin = true where role::text = 'admin';
-    alter table public.invitations drop column role;
-  end if;
-end $$;
-
--- L'antic tipus de rol únic (i les funcions que el feien servir) es netegen
--- al final d'aquest fitxer, un cop cap policy ni trigger ja no els referencia.
-
--- Equips que se li donaran automàticament quan la invitació s'accepti. Es pot
--- editar mentre estigui pendent; un cop acceptada, handle_new_user() converteix
--- aquestes files en team_members i les esborra.
+-- Equips pre-assignats (ja porten projecte, perquè els equips en tenen un).
 create table if not exists public.invitation_teams (
   email   text   not null references public.invitations(email) on delete cascade,
   team_id bigint not null references public.teams(id) on delete cascade,
@@ -170,7 +244,8 @@ grant execute on function public.email_is_invited(text) to anon, authenticated;
 
 -- Només es pot registrar qui tingui una invitació pendent. Si el correu no
 -- està convidat, l'excepció avorta la creació del compte a auth.users: no
--- queda cap usuari a mitges.
+-- queda cap usuari a mitges. En acceptar-la, la persona es queda amb els
+-- projectes i els equips que se li havien pre-assignat.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -201,14 +276,24 @@ begin
      set accepted_at = now(), accepted_by = new.id
    where email = inv.email;
 
-  -- Equips pre-assignats a la invitació: es donen ara i ja no calen més.
+  insert into public.project_members (project_id, user_id, is_manager, can_create, can_edit_all)
+  select ip.project_id, new.id, ip.is_manager, ip.can_create, ip.can_edit_all
+    from public.invitation_projects ip
+   where ip.email = inv.email
+  on conflict do nothing;
+
+  -- Els equips pre-assignats només valen si la persona acaba tenint accés al
+  -- projecte de l'equip: si no, l'equip no li serviria de res.
   insert into public.team_members (team_id, user_id)
   select it.team_id, new.id
     from public.invitation_teams it
+    join public.teams t on t.id = it.team_id
+    join public.project_members m on m.project_id = t.project_id and m.user_id = new.id
    where it.email = inv.email
   on conflict do nothing;
 
-  delete from public.invitation_teams where email = inv.email;
+  delete from public.invitation_projects where email = inv.email;
+  delete from public.invitation_teams    where email = inv.email;
 
   return new;
 end $$;
@@ -218,45 +303,95 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Ningú que no sigui admin pot canviar-se els permisos.
+-- Ningú que no sigui administrador de la instal·lació pot fer-se administrador.
 create or replace function public.guard_profile_capabilities()
 returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if (new.is_admin is distinct from old.is_admin
-      or new.can_create is distinct from old.can_create
-      or new.can_edit_all is distinct from old.can_edit_all)
-     and not public.is_admin() then
+  if new.is_admin is distinct from old.is_admin and not public.is_admin() then
     raise exception 'Només un administrador pot canviar els permisos d''un usuari';
   end if;
   return new;
 end $$;
 
-drop trigger if exists profiles_guard_role on public.profiles;
 drop trigger if exists profiles_guard_capabilities on public.profiles;
 create trigger profiles_guard_capabilities
   before update on public.profiles
   for each row execute function public.guard_profile_capabilities();
 
+-- Els membres d'un equip han de tenir accés al projecte de l'equip: si no, hi
+-- serien sense poder veure'n cap fitxa.
+create or replace function public.check_team_member_project()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  p_id bigint;
+begin
+  select project_id into p_id from public.teams where id = new.team_id;
+  if not exists (
+    select 1 from public.project_members m
+    where m.project_id = p_id and m.user_id = new.user_id
+  ) then
+    raise exception 'Aquesta persona no té accés al projecte de l''equip';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists team_members_check_project on public.team_members;
+create trigger team_members_check_project
+  before insert or update on public.team_members
+  for each row execute function public.check_team_member_project();
+
+-- Treure algú d'un projecte també l'ha de treure dels equips d'aquell projecte.
+create or replace function public.clean_team_memberships()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.team_members tm
+   using public.teams t
+   where tm.team_id = t.id
+     and t.project_id = old.project_id
+     and tm.user_id = old.user_id;
+  return old;
+end $$;
+
+drop trigger if exists project_members_clean_teams on public.project_members;
+create trigger project_members_clean_teams
+  after delete on public.project_members
+  for each row execute function public.clean_team_memberships();
+
 -- -----------------------------------------------------------------------------
 -- Zones i tipus de treball (classificació: "Habitació 1 · Pintura")
+-- Cada projecte té les seves llistes: els noms només han de ser únics dins
+-- del projecte.
 -- -----------------------------------------------------------------------------
 create table if not exists public.zones (
   id         bigint generated always as identity primary key,
-  name       text not null unique,
+  project_id bigint not null references public.projects(id) on delete cascade,
+  name       text not null,
   sort_order int  not null default 100,
-  active     boolean not null default true
+  active     boolean not null default true,
+  unique (project_id, name)
 );
 
 create table if not exists public.work_types (
   id         bigint generated always as identity primary key,
-  name       text not null unique,
+  project_id bigint not null references public.projects(id) on delete cascade,
+  name       text not null,
   sort_order int  not null default 100,
-  active     boolean not null default true
+  active     boolean not null default true,
+  unique (project_id, name)
 );
 
 -- -----------------------------------------------------------------------------
 -- Fitxes (tickets)
+--
+-- `project_id` diu de quina obra és i no es pot canviar mai (moure una fitxa de
+-- projecte deixaria zones, tipus, equips i permisos sense sentit).
+--
+-- `id` és únic a tota la base de dades (és el que fa servir Storage per als
+-- camins de les imatges), i `ref` és el número que es mostra: #001, #002…
+-- comptats dins de cada projecte.
 --
 -- L'estat és una columna generada, no s'edita a mà:
 --   resolt            -> les 3 aprovacions fetes
@@ -275,11 +410,16 @@ create table if not exists public.work_types (
 -- -----------------------------------------------------------------------------
 create table if not exists public.tickets (
   id                       bigint generated always as identity primary key,
+  project_id               bigint not null references public.projects(id) on delete cascade,
+  ref                      int,
   title                    text not null,
   description              text,
   zone_id                  bigint references public.zones(id) on delete set null,
   work_type_id             bigint references public.work_types(id) on delete set null,
   agreed_solution          text,
+  due_date                 date,
+  assignee_id              uuid   references public.profiles(id) on delete set null,
+  assignee_team_id         bigint references public.teams(id) on delete set null,
   approved_responsable_at  timestamptz,
   approved_responsable_by  uuid references public.profiles(id) on delete set null,
   approved_tecnics_at      timestamptz,
@@ -295,60 +435,8 @@ create table if not exists public.tickets (
   review_propietari_by     uuid references public.profiles(id) on delete set null,
   created_by uuid references public.profiles(id) on delete set null default auth.uid(),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
--- Camps afegits després de la primera versió: es fan servir ALTER TABLE
--- perquè aquest fitxer sigui idempotent tant en instal·lacions noves com
--- en bases de dades que ja tenien la taula creada.
-alter table public.tickets add column if not exists due_date date;
-alter table public.tickets add column if not exists assignee_id
-  uuid references public.profiles(id) on delete set null;
-alter table public.tickets add column if not exists assignee_team_id
-  bigint references public.teams(id) on delete set null;
-
-alter table public.tickets add column if not exists review_tecnics_at    timestamptz;
-alter table public.tickets add column if not exists review_tecnics_by    uuid
-  references public.profiles(id) on delete set null;
-alter table public.tickets add column if not exists review_propietari_at timestamptz;
-alter table public.tickets add column if not exists review_propietari_by uuid
-  references public.profiles(id) on delete set null;
-
-alter table public.tickets drop constraint if exists tickets_assignee_single_check;
-alter table public.tickets add constraint tickets_assignee_single_check
-  check (not (assignee_id is not null and assignee_team_id is not null));
-
--- Per a cada actor, aprovar i demanar revisió són excloents; i no es pot
--- demanar revisió si el responsable encara no ha marcat la feina com a feta.
-alter table public.tickets drop constraint if exists tickets_tecnics_review_check;
-alter table public.tickets add constraint tickets_tecnics_review_check
-  check (not (approved_tecnics_at is not null and review_tecnics_at is not null));
-alter table public.tickets drop constraint if exists tickets_propietari_review_check;
-alter table public.tickets add constraint tickets_propietari_review_check
-  check (not (approved_propietari_at is not null and review_propietari_at is not null));
-alter table public.tickets drop constraint if exists tickets_review_needs_responsable_check;
-alter table public.tickets add constraint tickets_review_needs_responsable_check
-  check (approved_responsable_at is not null
-     or (review_tecnics_at is null and review_propietari_at is null));
-
--- L'estat gruixut. Es crea aquí (i no dins del create table) perquè depèn de
--- les columnes de revisió, que en bases de dades antigues s'afegeixen amb els
--- ALTER de més amunt. Si la columna existeix amb l'expressió antiga (sense
--- 'a_revisar') es refà: una columna generada no es pot redefinir, cal
--- esborrar-la i tornar-la a crear.
-do $$ begin
-  if exists (
-    select 1 from information_schema.columns
-    where table_schema = 'public' and table_name = 'tickets' and column_name = 'status'
-      and coalesce(generation_expression::text, '') not like '%a_revisar%'
-  ) then
-    drop view if exists public.ticket_list;
-    alter table public.tickets drop column status;
-  end if;
-end $$;
-
-alter table public.tickets add column if not exists status text
-  generated always as (
+  updated_at timestamptz not null default now(),
+  status text generated always as (
     case
       when approved_responsable_at is not null
        and approved_tecnics_at     is not null
@@ -360,12 +448,10 @@ alter table public.tickets add column if not exists status text
         then 'solucio_acordada'
       else 'obert'
     end
-  ) stored;
-
--- Data de resolució: automàtica, la data de l'última de les 3 aprovacions
--- (no es pot desquadrar amb l'estat perquè es calcula igual que ell).
-alter table public.tickets add column if not exists resolved_at timestamptz
-  generated always as (
+  ) stored,
+  -- Data de resolució: automàtica, la data de l'última de les 3 aprovacions
+  -- (no es pot desquadrar amb l'estat perquè es calcula igual que ell).
+  resolved_at timestamptz generated always as (
     case
       when approved_responsable_at is not null
        and approved_tecnics_at     is not null
@@ -373,24 +459,122 @@ alter table public.tickets add column if not exists resolved_at timestamptz
         then greatest(approved_responsable_at, approved_tecnics_at, approved_propietari_at)
       else null
     end
-  ) stored;
+  ) stored,
+  constraint tickets_assignee_single_check
+    check (not (assignee_id is not null and assignee_team_id is not null)),
+  -- Per a cada actor, aprovar i demanar revisió són excloents; i no es pot
+  -- demanar revisió si el responsable encara no ha marcat la feina com a feta.
+  constraint tickets_tecnics_review_check
+    check (not (approved_tecnics_at is not null and review_tecnics_at is not null)),
+  constraint tickets_propietari_review_check
+    check (not (approved_propietari_at is not null and review_propietari_at is not null)),
+  constraint tickets_review_needs_responsable_check
+    check (approved_responsable_at is not null
+       or (review_tecnics_at is null and review_propietari_at is null))
+);
 
-create index if not exists tickets_status_idx        on public.tickets(status);
+create unique index if not exists tickets_project_ref_unique on public.tickets(project_id, ref);
+create index if not exists tickets_project_idx       on public.tickets(project_id);
+create index if not exists tickets_status_idx        on public.tickets(project_id, status);
 create index if not exists tickets_zone_idx          on public.tickets(zone_id);
 create index if not exists tickets_work_type_idx     on public.tickets(work_type_id);
 create index if not exists tickets_assignee_idx      on public.tickets(assignee_id);
 create index if not exists tickets_assignee_team_idx on public.tickets(assignee_team_id);
 create index if not exists tickets_due_date_idx      on public.tickets(due_date);
 
--- Pot editar una fitxa concreta: admin, algú amb permís global d'editar-ho tot,
--- o qui l'ha creada.
+-- Número de fitxa dins del projecte. El pany d'advisory lock serialitza les
+-- insercions del mateix projecte: dues fitxes creades alhora no poden agafar
+-- el mateix número.
+create or replace function public.assign_ticket_ref()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.ref is null then
+    perform pg_advisory_xact_lock(new.project_id);
+    select coalesce(max(ref), 0) + 1 into new.ref
+      from public.tickets where project_id = new.project_id;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists tickets_assign_ref on public.tickets;
+create trigger tickets_assign_ref
+  before insert on public.tickets
+  for each row execute function public.assign_ticket_ref();
+
+-- Tot el que penja d'una fitxa ha de ser del mateix projecte: la zona, el
+-- tipus, l'equip assignat i la persona assignada (que ha de tenir-hi accés).
+-- Així una fitxa no pot acabar apuntant a dades d'una altra obra ni assignada
+-- a algú que no la pot ni veure.
+create or replace function public.check_ticket_project()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'UPDATE' and new.project_id is distinct from old.project_id then
+    raise exception 'Una fitxa no es pot moure de projecte';
+  end if;
+
+  if new.zone_id is not null and not exists (
+    select 1 from public.zones z where z.id = new.zone_id and z.project_id = new.project_id
+  ) then
+    raise exception 'La zona no és d''aquest projecte';
+  end if;
+
+  if new.work_type_id is not null and not exists (
+    select 1 from public.work_types w
+     where w.id = new.work_type_id and w.project_id = new.project_id
+  ) then
+    raise exception 'El tipus no és d''aquest projecte';
+  end if;
+
+  if new.assignee_team_id is not null and not exists (
+    select 1 from public.teams t
+     where t.id = new.assignee_team_id and t.project_id = new.project_id
+  ) then
+    raise exception 'L''equip no és d''aquest projecte';
+  end if;
+
+  if new.assignee_id is not null and not exists (
+    select 1 from public.project_members m
+     where m.project_id = new.project_id and m.user_id = new.assignee_id
+  ) then
+    raise exception 'Aquesta persona no té accés al projecte';
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists tickets_check_project on public.tickets;
+create trigger tickets_check_project
+  before insert or update on public.tickets
+  for each row execute function public.check_ticket_project();
+
+-- -----------------------------------------------------------------------------
+-- Qui pot què, fitxa per fitxa
+--
+--   can_view_ticket    tenir accés al projecte de la fitxa. Un membre sense cap
+--                      permís ni equip és, de fet, un lector del projecte.
+--   can_edit_ticket    qui l'ha creada, qui té can_edit_all al projecte, qui
+--                      l'administra, i l'administrador de la instal·lació.
+--   can_comment_ticket qui la pot editar, qui hi és assignat (persona o equip) i
+--                      els equips globals de tècnics i propietaris del projecte.
+-- -----------------------------------------------------------------------------
+create or replace function public.can_view_ticket(p_ticket_id bigint)
+returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((
+    select public.is_project_member(t.project_id)
+    from public.tickets t where t.id = p_ticket_id
+  ), false);
+$$;
+
 create or replace function public.can_edit_ticket(p_ticket_id bigint)
 returns boolean
 language sql stable security definer set search_path = public as $$
   select coalesce((
-    select p.is_admin or p.can_edit_all or t.created_by = auth.uid()
-    from public.tickets t, public.profiles p
-    where t.id = p_ticket_id and p.id = auth.uid()
+    select public.can_edit_all_in(t.project_id)
+        or (t.created_by = auth.uid() and public.is_project_member(t.project_id))
+    from public.tickets t where t.id = p_ticket_id
   ), false);
 $$;
 
@@ -408,16 +592,17 @@ language sql stable security definer set search_path = public as $$
   ), false);
 $$;
 
--- Pot comentar (i per tant veure) una fitxa: qui la pot editar, qui hi és
--- assignat (persona o equip), o qualsevol membre dels equips globals de
--- tècnics/propietaris.
 create or replace function public.can_comment_ticket(p_ticket_id bigint)
 returns boolean
 language sql stable security definer set search_path = public as $$
-  select public.can_edit_ticket(p_ticket_id)
-      or public.is_assigned_to_ticket(p_ticket_id)
-      or public.is_global_team_member('tecnics')
-      or public.is_global_team_member('propietaris');
+  select coalesce((
+    select public.can_edit_ticket(p_ticket_id)
+        or (public.is_project_member(t.project_id) and (
+              public.is_assigned_to_ticket(p_ticket_id)
+           or public.is_global_team_member(t.project_id, 'tecnics')
+           or public.is_global_team_member(t.project_id, 'propietaris')))
+    from public.tickets t where t.id = p_ticket_id
+  ), false);
 $$;
 
 create or replace function public.touch_updated_at()
@@ -432,11 +617,13 @@ create trigger tickets_touch_updated_at
   before update on public.tickets
   for each row execute function public.touch_updated_at();
 
--- Cada casella d'aprovació la pot marcar només qui té dret a fer-ho (o un
--- admin). El trigger també segella qui ha aprovat i quan.
+-- Cada casella d'aprovació la pot marcar només qui té dret a fer-ho dins del
+-- projecte de la fitxa. El trigger també segella qui ha aprovat i quan.
 --   Responsable -> qui té la fitxa assignada (persona o equip)
---   Tècnics     -> qualsevol membre de l'equip amb rol global 'tecnics'
---   Propietari  -> qualsevol membre de l'equip amb rol global 'propietaris'
+--   Tècnics     -> qualsevol membre de l'equip del projecte amb rol 'tecnics'
+--   Propietari  -> qualsevol membre de l'equip del projecte amb rol 'propietaris'
+-- Qui administra el projecte (i l'administrador de la instal·lació) pot aprovar
+-- en nom de qualsevol actor.
 -- El responsable, a més, pot *esborrar* l'aprovació i la petició de revisió del
 -- tècnic i del propietari: és el que fa quan torna a marcar la feina com a feta
 -- («Revisat»), que reinicia el circuit d'aprovacions.
@@ -444,40 +631,60 @@ create or replace function public.guard_ticket_approvals()
 returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
-  admin       boolean;
+  manager     boolean;
   responsable boolean;
 begin
-  select p.is_admin into admin from public.profiles p where p.id = auth.uid();
-  if admin is null then
+  if not exists (select 1 from public.profiles p where p.id = auth.uid()) then
     raise exception 'No s''ha trobat el perfil de l''usuari';
   end if;
 
-  responsable := admin or old.assignee_id = auth.uid()
+  -- La policy d'UPDATE deixa entrar tothom qui pot aprovar, que no és el mateix
+  -- que poder editar: qui només aprova no pot tocar cap altre camp.
+  if not public.can_edit_ticket(new.id) then
+    if new.title           is distinct from old.title
+    or new.description      is distinct from old.description
+    or new.zone_id          is distinct from old.zone_id
+    or new.work_type_id     is distinct from old.work_type_id
+    or new.agreed_solution  is distinct from old.agreed_solution
+    or new.due_date         is distinct from old.due_date
+    or new.assignee_id      is distinct from old.assignee_id
+    or new.assignee_team_id is distinct from old.assignee_team_id
+    or new.ref              is distinct from old.ref
+    or new.created_by       is distinct from old.created_by
+    or new.created_at       is distinct from old.created_at
+    then
+      raise exception 'No tens permís per editar aquesta fitxa: només pots marcar les teves aprovacions';
+    end if;
+  end if;
+
+  manager := public.is_project_manager(old.project_id);
+
+  responsable := manager or old.assignee_id = auth.uid()
     or (old.assignee_team_id is not null and exists (
           select 1 from public.team_members
           where team_id = old.assignee_team_id and user_id = auth.uid()));
 
   if new.approved_responsable_at is distinct from old.approved_responsable_at then
     if not responsable then
-      raise exception 'Només qui té la fitxa assignada (o un admin) pot canviar aquesta aprovació';
+      raise exception 'Només qui té la fitxa assignada (o qui administra el projecte) pot canviar aquesta aprovació';
     end if;
     new.approved_responsable_by :=
       case when new.approved_responsable_at is null then null else auth.uid() end;
   end if;
 
   if new.approved_tecnics_at is distinct from old.approved_tecnics_at then
-    if not admin and not public.is_global_team_member('tecnics')
+    if not manager and not public.is_global_team_member(old.project_id, 'tecnics')
        and not (new.approved_tecnics_at is null and responsable) then
-      raise exception 'Només algú de l''equip de tècnics (o un admin) pot canviar aquesta aprovació';
+      raise exception 'Només algú de l''equip de tècnics del projecte pot canviar aquesta aprovació';
     end if;
     new.approved_tecnics_by :=
       case when new.approved_tecnics_at is null then null else auth.uid() end;
   end if;
 
   if new.approved_propietari_at is distinct from old.approved_propietari_at then
-    if not admin and not public.is_global_team_member('propietaris')
+    if not manager and not public.is_global_team_member(old.project_id, 'propietaris')
        and not (new.approved_propietari_at is null and responsable) then
-      raise exception 'Només algú de l''equip de propietaris (o un admin) pot canviar aquesta aprovació';
+      raise exception 'Només algú de l''equip de propietaris del projecte pot canviar aquesta aprovació';
     end if;
     new.approved_propietari_by :=
       case when new.approved_propietari_at is null then null else auth.uid() end;
@@ -486,18 +693,18 @@ begin
   -- Peticions de revisió: les demana l'actor mateix; les pot retirar ell o el
   -- responsable (quan torna a marcar la fitxa com a feta).
   if new.review_tecnics_at is distinct from old.review_tecnics_at then
-    if not admin and not public.is_global_team_member('tecnics')
+    if not manager and not public.is_global_team_member(old.project_id, 'tecnics')
        and not (new.review_tecnics_at is null and responsable) then
-      raise exception 'Només algú de l''equip de tècnics (o un admin) pot demanar la revisió';
+      raise exception 'Només algú de l''equip de tècnics del projecte pot demanar la revisió';
     end if;
     new.review_tecnics_by :=
       case when new.review_tecnics_at is null then null else auth.uid() end;
   end if;
 
   if new.review_propietari_at is distinct from old.review_propietari_at then
-    if not admin and not public.is_global_team_member('propietaris')
+    if not manager and not public.is_global_team_member(old.project_id, 'propietaris')
        and not (new.review_propietari_at is null and responsable) then
-      raise exception 'Només algú de l''equip de propietaris (o un admin) pot demanar la revisió';
+      raise exception 'Només algú de l''equip de propietaris del projecte pot demanar la revisió';
     end if;
     new.review_propietari_by :=
       case when new.review_propietari_at is null then null else auth.uid() end;
@@ -518,7 +725,7 @@ create or replace function public.reset_approvals_on_edit()
 returns trigger language plpgsql as $$
 begin
   if new.title           is distinct from old.title
-  or new.description     is distinct from old.description
+  or new.description      is distinct from old.description
   or new.zone_id          is distinct from old.zone_id
   or new.work_type_id     is distinct from old.work_type_id
   or new.agreed_solution  is distinct from old.agreed_solution
@@ -535,14 +742,13 @@ begin
   return new;
 end $$;
 
-drop trigger if exists tickets_reset_approvals_on_solution_change on public.tickets;
 drop trigger if exists tickets_reset_approvals_on_edit on public.tickets;
 create trigger tickets_reset_approvals_on_edit
   before update on public.tickets
   for each row execute function public.reset_approvals_on_edit();
 
 -- -----------------------------------------------------------------------------
--- Comentaris i imatges
+-- Comentaris i imatges (pengen de la fitxa, i per tant del seu projecte)
 -- -----------------------------------------------------------------------------
 create table if not exists public.comments (
   id         uuid primary key default gen_random_uuid(),
@@ -574,12 +780,23 @@ create index if not exists ticket_field_images_idx on public.ticket_field_images
 
 -- -----------------------------------------------------------------------------
 -- Row Level Security
--- Qui veu i comenta una fitxa ho decideix can_comment_ticket(): qui l'edita,
--- qui hi és assignat (persona o equip), o els equips globals de tècnics i
--- propietaris. L'escriptura depèn dels permisos de cada taula.
+--
+-- La frontera de tot és el projecte: qui no hi és membre no veu ni les fitxes,
+-- ni les zones, ni els equips, ni tan sols els perfils de la gent que hi
+-- treballa. Dins del projecte, qui pot editar i comentar cada fitxa el
+-- decideixen can_edit_ticket() i can_comment_ticket().
 -- -----------------------------------------------------------------------------
+create or replace function public.ticket_project(p_ticket_id bigint)
+returns bigint
+language sql stable security definer set search_path = public as $$
+  select project_id from public.tickets where id = p_ticket_id;
+$$;
+
 alter table public.profiles            enable row level security;
+alter table public.projects            enable row level security;
+alter table public.project_members     enable row level security;
 alter table public.invitations         enable row level security;
+alter table public.invitation_projects enable row level security;
 alter table public.invitation_teams    enable row level security;
 alter table public.teams               enable row level security;
 alter table public.team_members        enable row level security;
@@ -590,15 +807,44 @@ alter table public.comments            enable row level security;
 alter table public.comment_images      enable row level security;
 alter table public.ticket_field_images enable row level security;
 
+-- Perfils: el propi, i els de la gent amb qui es comparteix algun projecte.
 drop policy if exists profiles_select       on public.profiles;
 drop policy if exists profiles_update_self  on public.profiles;
 drop policy if exists profiles_update_admin on public.profiles;
 create policy profiles_select on public.profiles
-  for select to authenticated using (true);
+  for select to authenticated
+  using (id = auth.uid() or public.is_admin() or public.shares_project(id));
 create policy profiles_update_self on public.profiles
   for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
 create policy profiles_update_admin on public.profiles
   for update to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- Projectes: només els que et pertoquen. Els crea i els esborra l'administrador
+-- de la instal·lació; el nom el pot canviar qui l'administra.
+drop policy if exists projects_select on public.projects;
+drop policy if exists projects_insert on public.projects;
+drop policy if exists projects_update on public.projects;
+drop policy if exists projects_delete on public.projects;
+create policy projects_select on public.projects
+  for select to authenticated using (public.is_project_member(id));
+create policy projects_insert on public.projects
+  for insert to authenticated with check (public.is_admin());
+create policy projects_update on public.projects
+  for update to authenticated
+  using (public.is_project_manager(id)) with check (public.is_project_manager(id));
+create policy projects_delete on public.projects
+  for delete to authenticated using (public.is_admin());
+
+-- Accessos: els membres del projecte veuen qui més hi és (cal per assignar
+-- fitxes); els reparteix qui administra el projecte.
+drop policy if exists project_members_select on public.project_members;
+drop policy if exists project_members_write  on public.project_members;
+create policy project_members_select on public.project_members
+  for select to authenticated using (public.is_project_member(project_id));
+create policy project_members_write on public.project_members
+  for all to authenticated
+  using (public.is_project_manager(project_id))
+  with check (public.is_project_manager(project_id));
 
 -- Les invitacions només les veu i les gestiona un administrador. Qui es registra
 -- no llegeix la taula: passa per la funció email_is_invited().
@@ -606,67 +852,94 @@ drop policy if exists invitations_admin on public.invitations;
 create policy invitations_admin on public.invitations
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
+drop policy if exists invitation_projects_admin on public.invitation_projects;
+create policy invitation_projects_admin on public.invitation_projects
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
 drop policy if exists invitation_teams_admin on public.invitation_teams;
 create policy invitation_teams_admin on public.invitation_teams
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
--- Tothom veu els equips (calen per triar assignacions i filtres); només un
--- admin els crea, els renombra o en gestiona els membres.
+-- Equips: es veuen des de dins del projecte, i els gestiona qui l'administra.
 drop policy if exists teams_select on public.teams;
 drop policy if exists teams_write  on public.teams;
 create policy teams_select on public.teams
-  for select to authenticated using (true);
+  for select to authenticated using (public.is_project_member(project_id));
 create policy teams_write on public.teams
-  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+  for all to authenticated
+  using (public.is_project_manager(project_id))
+  with check (public.is_project_manager(project_id));
 
 drop policy if exists team_members_select on public.team_members;
 drop policy if exists team_members_write  on public.team_members;
 create policy team_members_select on public.team_members
-  for select to authenticated using (true);
+  for select to authenticated using (exists (
+    select 1 from public.teams t
+    where t.id = team_id and public.is_project_member(t.project_id)));
 create policy team_members_write on public.team_members
-  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+  for all to authenticated
+  using (exists (
+    select 1 from public.teams t
+    where t.id = team_id and public.is_project_manager(t.project_id)))
+  with check (exists (
+    select 1 from public.teams t
+    where t.id = team_id and public.is_project_manager(t.project_id)));
 
 drop policy if exists zones_select on public.zones;
 drop policy if exists zones_write  on public.zones;
 create policy zones_select on public.zones
-  for select to authenticated using (true);
+  for select to authenticated using (public.is_project_member(project_id));
 create policy zones_write on public.zones
-  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+  for all to authenticated
+  using (public.is_project_manager(project_id))
+  with check (public.is_project_manager(project_id));
 
 drop policy if exists work_types_select on public.work_types;
 drop policy if exists work_types_write  on public.work_types;
 create policy work_types_select on public.work_types
-  for select to authenticated using (true);
+  for select to authenticated using (public.is_project_member(project_id));
 create policy work_types_write on public.work_types
-  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+  for all to authenticated
+  using (public.is_project_manager(project_id))
+  with check (public.is_project_manager(project_id));
 
+-- Fitxes: les veu tot membre del projecte; les crea qui hi té permís de crear;
+-- les edita qui la pot editar; les esborra qui administra el projecte.
 drop policy if exists tickets_select on public.tickets;
 drop policy if exists tickets_insert on public.tickets;
 drop policy if exists tickets_update on public.tickets;
 drop policy if exists tickets_delete on public.tickets;
 create policy tickets_select on public.tickets
-  for select to authenticated using (public.can_comment_ticket(id));
+  for select to authenticated using (public.is_project_member(project_id));
 create policy tickets_insert on public.tickets
-  for insert to authenticated with check (public.can_create());
+  for insert to authenticated with check (public.can_create_in(project_id));
+-- L'UPDATE l'ha de poder fer també qui només aprova (el responsable assignat,
+-- els equips globals): si la policy exigís can_edit_ticket, marcar una casella
+-- no afectaria cap fila i l'aprovació fallaria en silenci. Que no pugui canviar
+-- res més que les aprovacions ho garanteix el trigger guard_ticket_approvals.
 create policy tickets_update on public.tickets
   for update to authenticated
-  using (public.can_edit_ticket(id)) with check (public.can_edit_ticket(id));
+  using (public.can_comment_ticket(id)) with check (public.can_comment_ticket(id));
 create policy tickets_delete on public.tickets
-  for delete to authenticated using (public.is_admin());
+  for delete to authenticated using (public.is_project_manager(project_id));
 
 drop policy if exists comments_select on public.comments;
 drop policy if exists comments_insert on public.comments;
 drop policy if exists comments_update on public.comments;
 drop policy if exists comments_delete on public.comments;
 create policy comments_select on public.comments
-  for select to authenticated using (public.can_comment_ticket(ticket_id));
+  for select to authenticated using (public.can_view_ticket(ticket_id));
 create policy comments_insert on public.comments
   for insert to authenticated
   with check (author_id = auth.uid() and public.can_comment_ticket(ticket_id));
 create policy comments_update on public.comments
-  for update to authenticated using (author_id = auth.uid() or public.is_admin());
+  for update to authenticated
+  using (author_id = auth.uid()
+     or public.is_project_manager(public.ticket_project(ticket_id)));
 create policy comments_delete on public.comments
-  for delete to authenticated using (author_id = auth.uid() or public.is_admin());
+  for delete to authenticated
+  using (author_id = auth.uid()
+     or public.is_project_manager(public.ticket_project(ticket_id)));
 
 drop policy if exists comment_images_select on public.comment_images;
 drop policy if exists comment_images_insert on public.comment_images;
@@ -674,7 +947,7 @@ drop policy if exists comment_images_delete on public.comment_images;
 create policy comment_images_select on public.comment_images
   for select to authenticated using (exists (
     select 1 from public.comments c
-    where c.id = comment_id and public.can_comment_ticket(c.ticket_id)));
+    where c.id = comment_id and public.can_view_ticket(c.ticket_id)));
 create policy comment_images_insert on public.comment_images
   for insert to authenticated with check (exists (
     select 1 from public.comments c
@@ -682,28 +955,33 @@ create policy comment_images_insert on public.comment_images
 create policy comment_images_delete on public.comment_images
   for delete to authenticated using (exists (
     select 1 from public.comments c
-    where c.id = comment_id and (c.author_id = auth.uid() or public.is_admin())));
+    where c.id = comment_id and (
+      c.author_id = auth.uid()
+      or public.is_project_manager(public.ticket_project(c.ticket_id)))));
 
 -- Igual que la resta de la fitxa: qui la pot editar gestiona les imatges de
--- descripció/solució; qui la pot veure/comentar les pot mirar.
+-- descripció/solució; qui és del projecte les pot mirar.
 drop policy if exists ticket_field_images_select on public.ticket_field_images;
 drop policy if exists ticket_field_images_insert on public.ticket_field_images;
 drop policy if exists ticket_field_images_delete on public.ticket_field_images;
 create policy ticket_field_images_select on public.ticket_field_images
-  for select to authenticated using (public.can_comment_ticket(ticket_id));
+  for select to authenticated using (public.can_view_ticket(ticket_id));
 create policy ticket_field_images_insert on public.ticket_field_images
   for insert to authenticated with check (public.can_edit_ticket(ticket_id));
 create policy ticket_field_images_delete on public.ticket_field_images
   for delete to authenticated using (public.can_edit_ticket(ticket_id));
 
 -- -----------------------------------------------------------------------------
--- Vista de llistat (zona, tipus i nombre de comentaris resolts d'un cop)
+-- Vista de llistat (projecte, zona, tipus i nombre de comentaris d'un cop)
 -- security_invoker: la vista respecta l'RLS de qui consulta.
 -- -----------------------------------------------------------------------------
 drop view if exists public.ticket_list;
 create view public.ticket_list with (security_invoker = on) as
 select
   t.id,
+  t.project_id,
+  pr.slug as project_slug,
+  t.ref,
   t.title,
   t.description,
   t.status,
@@ -728,6 +1006,7 @@ select
   t.updated_at,
   (select count(*) from public.comments c where c.ticket_id = t.id) as comment_count
 from public.tickets t
+join public.projects        pr on pr.id = t.project_id
 left join public.zones      z  on z.id  = t.zone_id
 left join public.work_types wt on wt.id = t.work_type_id
 left join public.profiles   a  on a.id  = t.assignee_id
@@ -737,9 +1016,10 @@ grant select on public.ticket_list to authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Storage: imatges dels comentaris i de les fitxes (bucket privat, s'accedeix
--- amb signed URLs). El camí sempre comença per l'id de la fitxa
--- ("{ticket_id}/..."), així que la RLS es pot lligar a can_comment_ticket /
--- can_edit_ticket d'aquella fitxa concreta.
+-- amb signed URLs). El camí sempre comença per l'id GLOBAL de la fitxa
+-- ("{ticket_id}/..."), no pel número que es mostra, així que la RLS es pot
+-- lligar a les funcions de permisos d'aquella fitxa concreta i el projecte hi
+-- queda inclòs.
 -- -----------------------------------------------------------------------------
 insert into storage.buckets (id, name, public)
 values ('ticket-images','ticket-images', false)
@@ -750,89 +1030,111 @@ drop policy if exists ticket_images_insert on storage.objects;
 drop policy if exists ticket_images_delete on storage.objects;
 create policy ticket_images_select on storage.objects
   for select to authenticated
-  using (bucket_id = 'ticket-images'
-    and public.can_comment_ticket((split_part(name, '/', 1))::bigint));
+  using (bucket_id = 'ticket-images' and name ~ '^[0-9]+/'
+    and public.can_view_ticket((split_part(name, '/', 1))::bigint));
 create policy ticket_images_insert on storage.objects
   for insert to authenticated
-  with check (bucket_id = 'ticket-images'
+  with check (bucket_id = 'ticket-images' and name ~ '^[0-9]+/'
     and public.can_comment_ticket((split_part(name, '/', 1))::bigint));
 create policy ticket_images_delete on storage.objects
   for delete to authenticated
-  using (bucket_id = 'ticket-images' and (
+  using (bucket_id = 'ticket-images' and name ~ '^[0-9]+/' and (
     owner = auth.uid()
-    or public.is_admin()
     or public.can_edit_ticket((split_part(name, '/', 1))::bigint)
   ));
 
--- -----------------------------------------------------------------------------
--- Neteja de l'antic sistema de rol únic. Es fa aquí, al final, perquè cap
--- policy ni trigger de més amunt ja no en depèn (totes s'han substituït per
--- les noves funcions basades en equips i permisos).
--- -----------------------------------------------------------------------------
-drop function if exists public.my_role();
-drop function if exists public.can_edit();
-drop function if exists public.can_comment();
-drop function if exists public.guard_profile_role();
-drop function if exists public.reset_approvals_on_solution_change();
-drop type if exists public.user_role;
 
 -- -----------------------------------------------------------------------------
--- Dades inicials (edita-les des de /admin quan vulguis)
+-- Dades inicials
+--
+-- Les llistes de zones i tipus que rep cada projecte nou. Viuen en una funció
+-- perquè les pugui sembrar l'app en crear un projecte, i el seed d'aquí sota
+-- en crear el primer, sense duplicar-les.
+--
+-- La versió `_unchecked` no comprova permisos i per això no es pot cridar des
+-- de l'app (es revoca l'execute); el que fa servir l'app és
+-- seed_project_catalogs(), que exigeix administrar el projecte.
 -- -----------------------------------------------------------------------------
+create or replace function public.seed_project_catalogs_unchecked(p_project_id bigint)
+returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.zones (project_id, name, sort_order)
+  select p_project_id, v.name, v.sort_order
+    from (values
+      ('Tanca',                 10),
+      ('Jardí',                 20),
+      ('Façana',                30),
+      ('Rebedor',               40),
+      ('Escales',               50),
+      ('Sala-Cuina-Menjador',   60),
+      ('Passadís PB',           70),
+      ('Bany cortesia',         80),
+      ('Bany PB',               90),
+      ('Bany suite',           100),
+      ('Bany comú',            110),
+      ('Habitació 1',          120),
+      ('Habitació 2',          130),
+      ('Habitació 3',          140),
+      ('Despatx 1',            150),
+      ('Despatx 2',            160),
+      ('Garatge',              170),
+      ('Traster',              180),
+      ('Traster P1',           190),
+      ('Safareig',             200),
+      ('Sala P1',              210),
+      ('Terrassa P1',          220),
+      ('Piscina',              230),
+      ('Terrassa jardí',       240),
+      ('Sala màquines',        250),
+      ('Passadís P1',          260)
+    ) as v(name, sort_order)
+  on conflict (project_id, name) do nothing;
 
--- Llista de zones revisada. Elimina les que ja no s'usen (les fitxes que hi
--- apuntaven queden sense zona, on delete set null); les que es mantenen amb
--- el mateix nom (Habitació 1/2/3, Garatge, Safareig) només actualitzen l'ordre.
-delete from public.zones
-where name in (
-  'Exterior / Façana', 'Coberta', 'Jardí / Parcel·la', 'Planta baixa',
-  'Planta primera', 'Escala', 'Cuina', 'Menjador - Sala', 'Bany 1',
-  'Bany 2', 'Instal·lacions', 'Altres'
-);
+  insert into public.work_types (project_id, name, sort_order)
+  select p_project_id, v.name, v.sort_order
+    from (values
+      ('Pintura',                        10),
+      ('Finestres',                      20),
+      ('Fusteria',                       30),
+      ('Electricitat',                   40),
+      ('Fontaneria',                     50),
+      ('Clima / Ventilació',             60),
+      ('Paviment',                       70),
+      ('Revestiments / Enrajolat',       80),
+      ('Sanejament',                     90),
+      ('Estructura',                    100),
+      ('Aïllament / Impermeabilització', 110),
+      ('Mobiliari',                     120),
+      ('Remats i neteja',               130),
+      ('Documentació / Legalitzacions', 140),
+      ('Altres',                        999)
+    ) as v(name, sort_order)
+  on conflict (project_id, name) do nothing;
+end $$;
 
-insert into public.zones (name, sort_order) values
-  ('Tanca',                 10),
-  ('Jardí',                 20),
-  ('Façana',                30),
-  ('Rebedor',               40),
-  ('Escales',               50),
-  ('Sala-Cuina-Menjador',   60),
-  ('Passadís PB',           70),
-  ('Bany cortesia',         80),
-  ('Bany PB',               90),
-  ('Bany suite',           100),
-  ('Bany comú',            110),
-  ('Habitació 1',          120),
-  ('Habitació 2',          130),
-  ('Habitació 3',          140),
-  ('Despatx 1',            150),
-  ('Despatx 2',            160),
-  ('Garatge',              170),
-  ('Traster',              180),
-  ('Traster P1',           190),
-  ('Safareig',             200),
-  ('Sala P1',              210),
-  ('Terrassa P1',          220),
-  ('Piscina',              230),
-  ('Terrassa jardí',       240),
-  ('Sala màquines',        250),
-  ('Passadís P1',          260)
-on conflict (name) do update set sort_order = excluded.sort_order;
+revoke all on function public.seed_project_catalogs_unchecked(bigint) from public;
+revoke all on function public.seed_project_catalogs_unchecked(bigint) from anon, authenticated;
 
-insert into public.work_types (name, sort_order) values
-  ('Pintura',                        10),
-  ('Finestres',                      20),
-  ('Fusteria',                       30),
-  ('Electricitat',                   40),
-  ('Fontaneria',                     50),
-  ('Clima / Ventilació',             60),
-  ('Paviment',                       70),
-  ('Revestiments / Enrajolat',       80),
-  ('Sanejament',                      90),
-  ('Estructura',                     100),
-  ('Aïllament / Impermeabilització', 110),
-  ('Mobiliari',                      120),
-  ('Remats i neteja',                130),
-  ('Documentació / Legalitzacions',  140),
-  ('Altres',                         999)
-on conflict (name) do nothing;
+create or replace function public.seed_project_catalogs(p_project_id bigint)
+returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_project_manager(p_project_id) then
+    raise exception 'Només qui administra el projecte pot sembrar-ne les llistes';
+  end if;
+  perform public.seed_project_catalogs_unchecked(p_project_id);
+end $$;
+
+grant execute on function public.seed_project_catalogs(bigint) to authenticated;
+
+-- El primer projecte, per no arrencar amb la pantalla buida. Els següents es
+-- creen des de /admin i neixen amb una còpia d'aquestes mateixes llistes.
+insert into public.projects (slug, name) values ('mirasol', 'Mirasol')
+on conflict (slug) do nothing;
+
+do $$
+begin
+  perform public.seed_project_catalogs_unchecked(
+    (select id from public.projects where slug = 'mirasol'));
+end $$;
