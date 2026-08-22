@@ -1,23 +1,29 @@
 -- =============================================================================
 -- Importació puntual de fitxes (llistat rebut del client).
--- Executa'l UNA SOLA VEGADA a l'SQL Editor de Supabase, després de tenir
--- l'schema.sql ja aplicat (necessita les zones, tipus i equips actuals).
+--
+-- Ja es va aplicar a la base de dades d'una sola obra, i aquelles fitxes arriben
+-- aquí per la migració (supabase/migracio): no s'ha de tornar a executar sobre
+-- el projecte «mirasol» o quedarien duplicades. Es manté perquè serveix de
+-- registre del lot i per si s'ha de carregar el mateix llistat en un projecte
+-- nou: canvia els dos 'mirasol' d'aquest fitxer i executa'l una sola vegada.
 -- =============================================================================
 
 -- Equip nou necessari per a aquest lot (la resta d'equips ja existien).
-insert into public.teams (name) values ('Piscines Ferron')
-on conflict (name) do nothing;
+insert into public.teams (project_id, name)
+select p.id, 'Piscines Ferron' from public.projects p where p.slug = 'mirasol'
+on conflict (project_id, name) do nothing;
 
-insert into public.tickets (title, description, zone_id, work_type_id, assignee_id, assignee_team_id, created_by)
+insert into public.tickets (project_id, title, description, zone_id, work_type_id, assignee_id, assignee_team_id, created_by)
 select
+  pr.id,
   v.title,
   v.description,
-  (select id from public.zones where name = v.zone_name),
-  (select id from public.work_types where name = v.work_type_name),
-  (select id from public.profiles where email = v.assignee_email),
-  (select id from public.teams where name = v.assignee_team),
-  (select id from public.profiles where email = 'marc.camara@gmail.com')
-from (values
+  (select id from public.zones      where project_id = pr.id and name = v.zone_name),
+  (select id from public.work_types where project_id = pr.id and name = v.work_type_name),
+  (select id from public.profiles   where email = v.assignee_email),
+  (select id from public.teams      where project_id = pr.id and name = v.assignee_team),
+  (select id from public.profiles   where email = 'marc.camara@gmail.com')
+from public.projects pr, (values
   ('Reparacions veïns', 'Reparacions veïns', 'General interior', null, null, 'House Habitat'),
   ('El pany de la terrassa no transitable està rallat', 'El pany de la terrassa no transitable està rallat', 'General interior', null, null, 'House Habitat'),
   ('Entregar claus: porta terrassa no transitable, garatge, exterior, etc.', 'Entregar claus: porta terrassa no transitable, garatge, exterior, etc.', 'General interior', null, null, 'House Habitat'),
@@ -103,4 +109,5 @@ from (values
   ('Sobre-barana, trobada amb aplacat façana fa panxa.', 'Sobre-barana, trobada amb aplacat façana fa panxa.', 'Terrassa P1', 'Revestiments / Enrajolat', null, 'House Habitat'),
   ('Òxid de la reixa.', 'Òxid de la reixa.', 'Terrassa P1', null, null, 'House Habitat'),
   ('Tapar cables / tubs cantonada fons esquerre', 'Tapar cables / tubs cantonada fons esquerre', 'Traster', 'Electricitat', null, 'HH - RAX')
-) as v(title, description, zone_name, work_type_name, assignee_email, assignee_team);
+) as v(title, description, zone_name, work_type_name, assignee_email, assignee_team)
+where pr.slug = 'mirasol';

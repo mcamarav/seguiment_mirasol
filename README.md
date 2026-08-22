@@ -1,16 +1,28 @@
-# Seguiment Mirasol
+# Seguiment d'obres (versió multiprojecte)
 
-Web app per fer seguiment de les tasques pendents de la construcció de l'habitatge.
-Next.js (App Router) + Supabase (autenticació, Postgres i emmagatzematge d'imatges).
+Web app per fer seguiment de les tasques pendents d'una obra — o de **diverses
+obres alhora**, cada una amb la seva gent. Next.js (App Router) + Supabase
+(autenticació, Postgres i emmagatzematge d'imatges).
+
+> Aquesta és la branca **`multiprojecte`**, amb la seva pròpia base de dades i la
+> seva pròpia URL. La branca `main` continua sent la versió d'una sola obra
+> («Seguiment Mirasol»), en producció i intacta. Els dos desplegaments no
+> comparteixen res: ni base de dades, ni imatges, ni comptes.
 
 ## Què fa
 
+- **Projectes** (obres). Cada projecte té les seves fitxes, les seves zones i
+  tipus, els seus equips i la seva numeració (`#001` dins de cada obra). La URL
+  el porta al davant: `/p/mirasol`, `/p/casa-del-pi`.
+- **Accés per projecte**: una persona veu els projectes on té accés i prou. Qui
+  no és membre d'un projecte no en veu res — ni les fitxes, ni les zones, ni la
+  llista de qui hi treballa. Es reparteix a l'administració de cada projecte.
 - **Usuaris** amb correu + contrasenya, **només per invitació**: no es pot
   registrar ningú que l'administrador no hagi autoritzat abans indicant el seu
-  correu. La invitació ja porta el rol que tindrà.
-- **Fitxes** amb ID (`#001`), nom curt, descripció, **zona** i **tipus**
-  (p. ex. `Habitació 1 · Pintura`), data prevista de resolució, persona
-  assignada, solució proposada i comentaris amb imatges.
+  correu. La invitació ja pot portar a quins projectes tindrà accés.
+- **Fitxes** amb número (`#001`), nom curt, descripció, **zona** i **tipus**
+  (p. ex. `Habitació 1 · Pintura`), data prevista de resolució, persona o equip
+  assignat, solució proposada i comentaris amb imatges.
 - **Tres aprovacions** — responsable, tècnics i propietari — sobre la solució
   proposada. La fitxa queda **resolta** automàticament quan totes tres hi són,
   i la data de resolució es calcula sola (la de l'última aprovació).
@@ -32,37 +44,49 @@ Next.js (App Router) + Supabase (autenticació, Postgres i emmagatzematge d'imat
   Si algú reescriu la solució proposada, les aprovacions i les peticions de
   revisió que ja s'havien fet es reinicien: cal tornar a passar el circuit.
 
-- **Llistat** amb pestanyes Pendents / A revisar / Resolts / Tots, filtres per zona, tipus i
-  persona assignada, ordenació (publicació, data prevista, data de resolució,
-  nom…), cerca per text i resum de cada fitxa (estat, aprovacions, nre. de
-  comentaris, data prevista). Un clic obre la fitxa en detall.
+- **Llistat** (dins de cada projecte) amb pestanyes Pendents / Per validar /
+  Resolts, filtres per zona, tipus i persona o equip assignat, ordenació, cerca
+  per text, resum de cada fitxa i exportació a PDF del que s'està veient.
 
-## Rols
+## Permisos
 
-| Rol | Què pot fer |
-|---|---|
-| Administrador | Tot, i aprovar en nom de qualsevol actor. Gestiona usuaris, zones i tipus. |
-| Responsable | Crear i editar fitxes. Aprova la casella **Responsable**. |
-| Tècnic | Crear i editar fitxes. Aprova la casella **Tècnics**. |
-| Propietari | Crear i editar fitxes. Aprova la casella **Propietari**. |
-| Comentador | Només afegir comentaris i imatges. |
-| Lector | Només consultar. |
+Hi ha **un sol permís global**: administrador de la instal·lació. Tota la resta
+és de cada projecte, així que la mateixa persona pot ser responsable a una obra i
+només lectora a una altra.
 
-Els permisos s'apliquen **a la base de dades** (Row Level Security + triggers),
-no només a la interfície: ningú pot marcar una aprovació que no li correspon
-encara que manipuli les peticions.
+| Permís | On es dona | Què pot fer |
+|---|---|---|
+| Administrador | `/admin` | Tot, a tots els projectes. Crea projectes, convida gent i reparteix accessos. |
+| Administrar el projecte | `/p/<obra>/admin` | Tot dins d'aquell projecte: accessos, equips, zones i tipus, i aprovar en nom de qualsevol actor. |
+| Crear fitxes | `/p/<obra>/admin` | Obrir fitxes noves en aquell projecte (i editar les que ha obert). |
+| Editar totes | `/p/<obra>/admin` | Editar qualsevol fitxa del projecte. |
+| Accés, sense res marcat | `/p/<obra>/admin` | Consultar les fitxes del projecte; comentar les que tingui assignades o les del seu equip. |
+
+Les **aprovacions** van pels equips de cada projecte: un equip pot tenir el rol
+global de `Tècnics` o de `Propietaris` dins de la seva obra, i els seus membres
+aproven aquella casella (i poden comentar) a totes les fitxes del projecte. La
+casella **Responsable** l'aprova qui tingui la fitxa assignada, sigui una persona
+o un equip sencer.
+
+Tot això s'aplica **a la base de dades** (Row Level Security + triggers), no
+només a la interfície: ningú pot veure un projecte que no li toca ni marcar una
+aprovació que no li correspon encara que manipuli les peticions. Qui pot aprovar
+però no editar només pot tocar les seves caselles: si intenta canviar el text de
+la fitxa, la base de dades l'atura.
 
 ## Posada en marxa
 
 ### 1. Crear el projecte de Supabase
 
-1. Entra a [supabase.com](https://supabase.com) i crea un projecte nou (pla gratuït).
+Aquesta versió necessita una base de dades **nova i buida**: l'esquema no és
+compatible amb el de la branca `main` (les taules porten `project_id`).
+
+1. Entra a [supabase.com](https://supabase.com) i crea un projecte nou.
 2. Ve a **SQL Editor**, obre una consulta nova, enganxa tot el contingut de
-   [`supabase/schema.sql`](supabase/schema.sql) i executa'l. Això crea les taules,
-   els permisos, el *bucket* d'imatges i les llistes inicials de zones i tipus.
+   [`supabase/schema.sql`](supabase/schema.sql) i executa'l. Això crea les
+   taules, els permisos, el *bucket* d'imatges, un primer projecte («Mirasol»)
+   amb les seves zones i tipus, i la invitació de l'administrador inicial.
 3. A **Authentication → Providers → Email**, comprova que *Email* està actiu.
-   Si vols estalviar-te els correus de confirmació mentre proves, desactiva
-   *Confirm email*.
 
 > Si l'SQL falla al tros de `storage.objects` per manca de permisos, crea les
 > tres polítiques del *bucket* `ticket-images` des de **Storage → Policies**
@@ -74,8 +98,8 @@ encara que manipuli les peticions.
 cp .env.local.example .env.local
 ```
 
-Omple els dos valors amb els de **Project Settings → API** de Supabase:
-`NEXT_PUBLIC_SUPABASE_URL` i `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+Omple els dos valors amb els de **Project Settings → API** del projecte de
+Supabase NOU: `NEXT_PUBLIC_SUPABASE_URL` i `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 
 ### 3. Executar-la
 
@@ -90,55 +114,104 @@ Obre http://localhost:3000.
 L'esquema ja sembra la invitació d'administrador per a **marc.camara@gmail.com**.
 Ve a `/registre` amb aquest correu, tria una contrasenya i entraràs com a
 administrador. Si vols un altre correu, canvia'l a l'`insert into
-public.invitations` de `supabase/schema.sql` abans d'executar-lo (o afegeix la
-fila a mà des del Table Editor).
+public.invitations` de `supabase/schema.sql` abans d'executar-lo.
 
-### 5. Convidar la resta de gent
+### 5. Projectes i gent
 
-A `/admin → Convidats`, escriu el correu i tria el rol. Passa-li l'enllaç de
-l'app i es crearà la contrasenya ell mateix a `/registre`. Qualsevol altre correu
-és rebutjat.
+- A `/admin → Projectes` es creen les obres. Cada una neix amb la llista de
+  zones i tipus per defecte, que després es retoca a la seva administració.
+- A `/admin → Convidats` s'autoritza un correu i es marca a quins projectes
+  tindrà accés. Passa-li l'enllaç de l'app i es crearà la contrasenya ell
+  mateix a `/registre`. Qualsevol altre correu és rebutjat.
+- A `/p/<obra>/admin` es reparteixen els permisos de dins del projecte, els
+  equips i les zones i tipus.
 
-Això s'aplica **a la base de dades**: el trigger `handle_new_user()` avorta la
-creació del compte si el correu no consta com a invitació pendent, així que no hi
-ha manera de colar-s'hi saltant-se la interfície. Retirar una invitació pendent
-la invalida; retirar-ne una ja utilitzada no esborra el compte (per fer-ho, ve a
-**Authentication → Users** de Supabase).
+Que només es pugui registrar qui està convidat s'aplica **a la base de dades**:
+el trigger `handle_new_user()` avorta la creació del compte si el correu no
+consta com a invitació pendent.
+
+## Migrar les dades de la versió d'una sola obra
+
+Els scripts de [`supabase/migracio/`](supabase/migracio) porten les dades de la
+base de dades actual (la de `main`) al projecte «Mirasol» de la base nova. Es
+conserven **els ids de les fitxes** (els camins de les imatges hi apunten) i el
+número que es mostra (`#007` continua sent `#007`), i els permisos globals que
+tenia cada persona passen a ser els seus permisos dins d'aquell projecte.
+
+Cal, de la base ANTIGA: la cadena de connexió (*Project Settings → Database →
+Connection string → URI*) i la `service_role` key. De la NOVA: les mateixes dues
+coses. La base antiga només es llegeix.
+
+```bash
+# 1. Exportar (només llegeix la base antiga)
+OLD_DB_URL="postgresql://postgres:...@db.ANTIGA.supabase.co:5432/postgres" \
+  ./supabase/migracio/01_exporta.sh export
+
+# 2. Recrear els comptes a la base nova, amb els mateixos ids i contrasenyes
+NEW_SUPABASE_URL="https://NOVA.supabase.co" NEW_SERVICE_KEY="…" \
+  node supabase/migracio/02_usuaris.mjs export
+
+# 3. Carregar les dades dins del projecte 'mirasol'
+NEW_DB_URL="postgresql://postgres:...@db.NOVA.supabase.co:5432/postgres" \
+  ./supabase/migracio/03_importa.sh export mirasol
+
+# 4. Copiar les imatges d'un bucket a l'altre
+OLD_SUPABASE_URL="https://ANTIGA.supabase.co" OLD_SERVICE_KEY="…" \
+NEW_SUPABASE_URL="https://NOVA.supabase.co"   NEW_SERVICE_KEY="…" \
+  node supabase/migracio/04_imatges.mjs
+```
+
+Cada pas s'atura si troba res que no quadri (un compte que no s'ha pogut recrear
+amb el seu id, una imatge que no hi és) en lloc de deixar les dades a mitges. El
+pas 3 va tot dins d'una transacció.
 
 ## Desplegament a Vercel
 
-1. Puja el repositori a GitHub.
-2. A Vercel, *Add New → Project*, importa'l.
-3. Afegeix les dues variables d'entorn (`NEXT_PUBLIC_SUPABASE_URL` i
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY`) i desplega.
-4. A Supabase, **Authentication → URL Configuration**, posa el domini de Vercel
-   com a *Site URL* perquè els correus de confirmació apuntin bé.
+Aquesta branca es desplega com un **projecte de Vercel a part**, per tenir la
+seva URL i les seves variables d'entorn sense tocar la producció de `main`:
 
-No cal res més: Supabase ja fa de base de dades i d'emmagatzematge d'imatges.
+1. A Vercel, *Add New → Project* i importa el mateix repositori de GitHub.
+2. Posa-li un nom diferent (p. ex. `seguiment-obres`).
+3. A **Settings → Git → Production Branch**, canvia `main` per `multiprojecte`.
+4. Afegeix les dues variables d'entorn (`NEXT_PUBLIC_SUPABASE_URL` i
+   `NEXT_PUBLIC_SUPABASE_ANON_KEY`) amb les del projecte de Supabase NOU.
+5. A Supabase, **Authentication → URL Configuration**, posa el domini nou com a
+   *Site URL* perquè els correus de confirmació apuntin bé.
+
+El projecte de Vercel de `main` no es toca: continua desplegant `main` amb la
+seva base de dades.
 
 ## Estructura
 
 ```
-supabase/schema.sql          Esquema, RLS, triggers, bucket i dades inicials
-src/middleware.ts            Refresc de sessió i protecció de rutes
-src/lib/                     Client de Supabase, tipus, permisos, formats
-src/app/entrar, /registre    Autenticació (registre només per invitació)
-src/app/(app)/page.tsx       Llistat de fitxes amb filtres
-src/app/(app)/tickets/       Nova fitxa, detall, aprovacions, comentaris
-src/app/(app)/admin/         Convidats, usuaris i rols, zones i tipus
+supabase/schema.sql            Esquema, RLS, triggers, bucket i dades inicials
+supabase/migracio/             Migració des de la versió d'una sola obra
+src/middleware.ts              Refresc de sessió i protecció de rutes
+src/lib/project.ts             Càrrega del projecte i dels permisos de dins
+src/lib/permissions.ts         Qui pot què (sempre dins d'un projecte)
+src/lib/routes.ts              /p/<obra>/… (també des del client)
+src/app/entrar, /registre      Autenticació (registre només per invitació)
+src/app/(app)/page.tsx         Selector de projectes
+src/app/(app)/admin/           Projectes, convidats i comptes (administració general)
+src/app/(app)/p/[projecte]/    Tot el que és de dins d'una obra:
+  page.tsx                       llistat de fitxes amb filtres
+  tickets/                       nova fitxa, detall, aprovacions, comentaris, PDF
+  admin/                         accessos, equips, zones i tipus del projecte
 ```
-
-Les zones i els tipus són taules editables des de `/admin`: pots afegir-ne,
-reanomenar-los o amagar-los sense tocar codi. Amagar-ne un no afecta les fitxes
-que ja l'utilitzen.
 
 ## Notes
 
 - Les imatges es pugen des del navegador directament a Supabase Storage,
   reduïdes a 1600 px de costat màxim per no cremar dades al mòbil. El *bucket*
-  és privat; les fitxes les mostren amb URLs signades d'una hora.
+  és privat; les fitxes les mostren amb URLs signades d'una hora. El camí sempre
+  comença per l'id **global** de la fitxa, no pel número que es mostra.
 - Les aprovacions i les peticions de revisió **es reinicien** (trigger
   `reset_approvals_on_edit`) si algú edita la fitxa després que ja s'hagin
   donat: cal tornar a passar el circuit per a la versió nova.
-- El camp «Assignat a» només ofereix usuaris amb rol admin/responsable/tècnic/
-  propietari (els que poden editar fitxes).
+- Una fitxa no es pot moure de projecte, i la seva zona, tipus, equip i persona
+  assignada han de ser del mateix projecte: ho comprova el trigger
+  `check_ticket_project`.
+- Treure algú d'un projecte també el treu dels equips d'aquell projecte; les
+  fitxes que hagi creat es queden.
+- Esborrar un projecte només es pot fer si està buit. Per deixar-ne un de banda
+  sense perdre res, s'amaga.
