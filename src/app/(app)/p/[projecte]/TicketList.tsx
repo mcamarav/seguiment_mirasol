@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { StatusBadge } from '@/components/StatusBadge'
 import { ApprovalPips } from '@/components/ApprovalPips'
 import { formatDateShort, ticketRef, truncate } from '@/lib/format'
+import { projectPath } from '@/lib/routes'
 import type { TicketListRow } from '@/lib/types'
 
 // Mateixes columnes a la capçalera i a cada fila. A partir de `md` és una taula
@@ -23,7 +24,7 @@ function assigneeLabel(t: TicketListRow): string | null {
   return t.assignee_name || t.assignee_email || null
 }
 
-export function TicketList({ rows }: { rows: TicketListRow[] }) {
+export function TicketList({ slug, rows }: { slug: string; rows: TicketListRow[] }) {
   return (
     <div className="card overflow-hidden">
       <div
@@ -43,12 +44,12 @@ export function TicketList({ rows }: { rows: TicketListRow[] }) {
           return (
             <li key={t.id}>
               <Link
-                href={`/tickets/${t.id}`}
+                href={projectPath(slug, `/tickets/${t.ref}`)}
                 className={`grid grid-cols-[1fr_auto] gap-x-3 gap-y-1.5 px-4 py-3 transition-colors hover:bg-[var(--color-brand-soft)] md:items-start md:gap-3 ${COLUMNS}`}
               >
                 <div className="order-1 min-w-0 text-xs text-[var(--color-muted)] md:order-none">
                   <span className="font-mono font-semibold text-[var(--color-ink)]">
-                    {ticketRef(t.id)}
+                    {ticketRef(t.ref)}
                   </span>
                   <span className="block truncate">{t.zone_name ?? 'Sense zona'}</span>
                 </div>

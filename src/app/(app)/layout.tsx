@@ -16,7 +16,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
           <Link href="/" className="mr-auto min-w-0">
             <span className="block truncate text-base font-bold tracking-tight">
-              Seguiment Mirasol
+              Seguiment d’obres
             </span>
             <span className="block truncate text-xs text-[var(--color-muted)]">
               {displayName(profile)} {profile.is_admin ? '· Administrador' : ''}

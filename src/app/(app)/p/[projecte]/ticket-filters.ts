@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { projectPath } from '@/lib/routes'
 
 /** Filtres i ordenació de la llista de fitxes. Es comparteixen entre la llista
  * i la vista d'impressió, perquè el PDF surti exactament amb el mateix conjunt
@@ -89,11 +90,13 @@ export function parseTicketFilters(sp: SearchParams): TicketFilters {
   }
 }
 
-/** Enllaç a `path` amb els paràmetres buits descartats. Els valors múltiples es
- * repeteixen com a paràmetre (zona=1&zona=2), tal com els envia el formulari. */
+/** Enllaç dins del projecte amb els paràmetres buits descartats. Els valors
+ * múltiples es repeteixen com a paràmetre (zona=1&zona=2), tal com els envia el
+ * formulari. `sub` és la pantalla dins del projecte: '' és la llista de fitxes. */
 export function buildHref(
+  slug: string,
   params: Record<string, string | string[] | undefined>,
-  path = '/',
+  sub = '',
 ): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -104,24 +107,29 @@ export function buildHref(
     }
   }
   const qs = search.toString()
+  const path = projectPath(slug, sub)
   return qs ? `${path}?${qs}` : path
 }
 
-export function hrefFor(f: TicketFilters, path = '/'): string {
+export function hrefFor(slug: string, f: TicketFilters, sub = ''): string {
   return buildHref(
+    slug,
     { estat: f.estats, zona: f.zona, tipus: f.tipus, assignat: f.assignat, q: f.q, ordre: f.ordre },
-    path,
+    sub,
   )
 }
 
-/** Consulta de `ticket_list` ja filtrada i ordenada. */
+/** Consulta de `ticket_list` ja filtrada i ordenada, sempre dins d'un projecte.
+ * El projecte no surt mai dels filtres de la URL: el diu la ruta, i l'RLS el
+ * torna a comprovar. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function ticketListQuery(supabase: SupabaseClient<any>, f: TicketFilters) {
+export function ticketListQuery(supabase: SupabaseClient<any>, projectId: number, f: TicketFilters) {
   const sort = SORT_OPTIONS.find((s) => s.key === f.ordre)!
 
   let query = supabase
     .from('ticket_list')
     .select('*')
+    .eq('project_id', projectId)
     .order(sort.column, { ascending: sort.ascending, nullsFirst: false })
 
   // L'estat de la base de dades no serveix tal qual: «obert» i

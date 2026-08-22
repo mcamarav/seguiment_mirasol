@@ -15,23 +15,29 @@ const GLOBAL_ROLE_LABELS = {
 } as const
 
 export function TeamsEditor({
+  slug,
   teams,
   profiles,
 }: {
+  slug: string
   teams: TeamWithMembers[]
+  /** Només la gent que té accés al projecte: la base de dades no deixa posar
+   * ningú altre en un equip. */
   profiles: Profile[]
 }) {
   return (
     <section className="card p-4">
       <h2 className="font-semibold">Equips</h2>
       <p className="mt-1 text-xs text-[var(--color-muted)]">
-        Una persona pot pertànyer a diversos equips. Un equip amb rol global (Tècnics o
-        Propietaris) aprova aquella casella i veu totes les fitxes, no només les assignades. La
-        casella «Responsable» l’aprova qui tingui la fitxa assignada — a «Assignat a», dins de
-        cada fitxa.
+        Els equips són d’aquest projecte. Una persona pot pertànyer a diversos equips, i tenir
+        equips diferents a cada projecte. Un equip amb rol global (Tècnics o Propietaris) aprova
+        aquella casella i veu totes les fitxes del projecte, no només les assignades. La casella
+        «Responsable» l’aprova qui tingui la fitxa assignada — a «Assignat a», dins de cada
+        fitxa.
       </p>
 
       <form action={createTeam} className="mt-3 flex gap-2">
+        <input type="hidden" name="projecte" value={slug} />
         <input name="name" required className="field" placeholder="Nom de l’equip nou…" />
         <SubmitButton className="btn btn-secondary shrink-0" pendingLabel="Creant…">
           Crear equip
@@ -43,6 +49,7 @@ export function TeamsEditor({
           <li key={team.id} className="rounded-xl border border-[var(--color-line)] p-3">
             <div className="flex flex-wrap items-center gap-2">
               <form action={renameTeam} className="flex min-w-0 flex-1 gap-2">
+                <input type="hidden" name="projecte" value={slug} />
                 <input type="hidden" name="id" value={team.id} />
                 <input name="name" defaultValue={team.name} className="field" />
                 <SubmitButton
@@ -53,6 +60,7 @@ export function TeamsEditor({
                 </SubmitButton>
               </form>
               <form action={deleteTeam} className="shrink-0">
+                <input type="hidden" name="projecte" value={slug} />
                 <input type="hidden" name="id" value={team.id} />
                 <SubmitButton
                   className="text-xs font-semibold text-[var(--color-muted)] hover:text-red-700"
@@ -64,6 +72,7 @@ export function TeamsEditor({
             </div>
 
             <form action={setTeamGlobalRole} className="mt-2 flex items-center gap-2">
+              <input type="hidden" name="projecte" value={slug} />
               <input type="hidden" name="id" value={team.id} />
               <select
                 name="global_role"
@@ -80,7 +89,7 @@ export function TeamsEditor({
               </SubmitButton>
               {team.global_role && (
                 <span className="text-xs text-[var(--color-muted)]">
-                  Aprova {GLOBAL_ROLE_LABELS[team.global_role]} a totes les fitxes
+                  Aprova {GLOBAL_ROLE_LABELS[team.global_role]} a totes les fitxes del projecte
                 </span>
               )}
             </form>
@@ -92,6 +101,7 @@ export function TeamsEditor({
                 return (
                   <li key={p.id}>
                     <form action={toggleTeamMembership}>
+                      <input type="hidden" name="projecte" value={slug} />
                       <input type="hidden" name="team_id" value={team.id} />
                       <input type="hidden" name="user_id" value={p.id} />
                       <input type="hidden" name="is_member" value={String(isMember)} />

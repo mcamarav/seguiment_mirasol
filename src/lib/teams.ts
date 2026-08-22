@@ -42,12 +42,14 @@ export function toInvitationTeamsMap(rows: { email: string; team_id: number }[])
   return map
 }
 
-/** Shape que retorna `select('id, name, global_role, created_at, team_members(user_id)')`. */
+/** Shape que retorna
+ * `select('id, project_id, name, global_role, created_at, team_members(user_id)')`. */
 export function toTeamsWithMembers(
-  rows: { id: number; name: string; global_role: string | null; created_at: string; team_members: { user_id: string }[] }[],
+  rows: { id: number; project_id: number; name: string; global_role: string | null; created_at: string; team_members: { user_id: string }[] }[],
 ): TeamWithMembers[] {
   return rows.map((r) => ({
     id: r.id,
+    project_id: r.project_id,
     name: r.name,
     global_role: r.global_role as TeamWithMembers['global_role'],
     created_at: r.created_at,

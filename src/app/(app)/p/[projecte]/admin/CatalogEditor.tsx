@@ -4,11 +4,13 @@ import type { Zone } from '@/lib/types'
 
 /** Editor de llistes simples (zones o tipus): afegir, reanomenar, activar/desactivar. */
 export function CatalogEditor({
+  slug,
   table,
   title,
   hint,
   items,
 }: {
+  slug: string
   table: 'zones' | 'work_types'
   title: string
   hint: string
@@ -20,6 +22,7 @@ export function CatalogEditor({
       <p className="mt-1 text-xs text-[var(--color-muted)]">{hint}</p>
 
       <form action={addCatalogItem} className="mt-3 flex gap-2">
+        <input type="hidden" name="projecte" value={slug} />
         <input type="hidden" name="table" value={table} />
         <input name="name" required className="field" placeholder="Afegir…" />
         <SubmitButton className="btn btn-secondary shrink-0" pendingLabel="Afegint…">
@@ -31,6 +34,7 @@ export function CatalogEditor({
         {items.map((item) => (
           <li key={item.id} className="flex items-center gap-2 py-2">
             <form action={renameCatalogItem} className="flex min-w-0 flex-1 gap-2">
+              <input type="hidden" name="projecte" value={slug} />
               <input type="hidden" name="table" value={table} />
               <input type="hidden" name="id" value={item.id} />
               <input
@@ -46,6 +50,7 @@ export function CatalogEditor({
               </SubmitButton>
             </form>
             <form action={toggleCatalogItem} className="shrink-0">
+              <input type="hidden" name="projecte" value={slug} />
               <input type="hidden" name="table" value={table} />
               <input type="hidden" name="id" value={item.id} />
               <input type="hidden" name="active" value={String(item.active)} />

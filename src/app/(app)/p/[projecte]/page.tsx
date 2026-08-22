@@ -1,9 +1,11 @@
 import Link from 'next/link'
 import Form from 'next/form'
-import { createClient, getCurrentProfile } from '@/lib/supabase/server'
+import { notFound } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
 import { canCreateTickets } from '@/lib/permissions'
+import { loadProjectContext, loadProjectPeople } from '@/lib/project'
+import { projectPath } from '@/lib/routes'
 import { STAGE_COUNT_LABELS, STAGES, stageOf, type TicketStage } from '@/lib/status'
-import { toTeamsWithMembers } from '@/lib/teams'
 import { displayName } from '@/lib/format'
 import { TicketList } from './TicketList'
 import { FilterMultiSelect } from './FilterMultiSelect'
@@ -16,29 +18,33 @@ import {
   TOTS_ELS_ESTATS,
   ticketListQuery,
 } from './ticket-filters'
-import type { Profile, TicketListRow, WorkType, Zone } from '@/lib/types'
+import type { TicketListRow, WorkType, Zone } from '@/lib/types'
 
 export default async function TicketsPage({
+  params,
   searchParams,
 }: {
+  params: Promise<{ projecte: string }>
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
+  const { projecte } = await params
+  const context = await loadProjectContext(projecte)
+  if (!context) notFound()
+
+  const { project, access, teams } = context
+  const slug = project.slug
+
   const filters = parseTicketFilters(await searchParams)
   const { estats, zona, tipus, assignat, q, ordre } = filters
 
-  const profile = await getCurrentProfile()
   const supabase = await createClient()
 
-  const [{ data: tickets, error }, { data: zones }, { data: workTypes }, { data: profiles }, { data: teamRows }] =
-    await Promise.all([
-      ticketListQuery(supabase, filters),
-      supabase.from('zones').select('*').order('sort_order'),
-      supabase.from('work_types').select('*').order('sort_order'),
-      supabase.from('profiles').select('id, email, full_name, is_admin, can_create, can_edit_all, created_at'),
-      supabase.from('teams').select('id, name, global_role, created_at, team_members(user_id)'),
-    ])
-  const assignees = (profiles ?? []) as Profile[]
-  const teams = toTeamsWithMembers(teamRows ?? [])
+  const [{ data: tickets, error }, { data: zones }, { data: workTypes }, people] = await Promise.all([
+    ticketListQuery(supabase, project.id, filters),
+    supabase.from('zones').select('*').eq('project_id', project.id).order('sort_order'),
+    supabase.from('work_types').select('*').eq('project_id', project.id).order('sort_order'),
+    loadProjectPeople(project.id),
+  ])
 
   const rows = (tickets ?? []) as TicketListRow[]
 
@@ -70,14 +76,14 @@ export default async function TicketsPage({
         <h1 className="mr-auto text-xl font-bold tracking-tight">Fitxes</h1>
         {rows.length > 0 && (
           <Link
-            href={hrefFor(filters, '/tickets/imprimir')}
+            href={hrefFor(slug, filters, '/tickets/imprimir')}
             className="text-sm font-semibold text-[var(--color-muted)]"
           >
             Exportar PDF
           </Link>
         )}
-        {profile && canCreateTickets(profile) && (
-          <Link href="/tickets/nova" className="btn btn-primary">
+        {canCreateTickets(access) && (
+          <Link href={projectPath(slug, '/tickets/nova')} className="btn btn-primary">
             + Nova fitxa
           </Link>
         )}
@@ -92,7 +98,7 @@ export default async function TicketsPage({
           return (
             <Link
               key={key}
-              href={buildHref({
+              href={buildHref(slug, {
                 estat: seguent.length > 0 ? seguent : TOTS_ELS_ESTATS,
                 zona,
                 tipus,
@@ -108,7 +114,7 @@ export default async function TicketsPage({
           )
         })}
         <Link
-          href={buildHref({ estat: TOTS_ELS_ESTATS, zona, tipus, assignat, q, ordre })}
+          href={buildHref(slug, { estat: TOTS_ELS_ESTATS, zona, tipus, assignat, q, ordre })}
           aria-pressed={totsMarcats}
           className={chipClass(totsMarcats)}
         >
@@ -116,7 +122,7 @@ export default async function TicketsPage({
         </Link>
       </nav>
 
-      <Form action="/" id="filtres" className="card space-y-3 p-3">
+      <Form action={projectPath(slug)} id="filtres" className="card space-y-3 p-3">
         {estats.map((e) => (
           <input key={e} type="hidden" name="estat" value={e} />
         ))}
@@ -179,9 +185,9 @@ export default async function TicketsPage({
                   label: t.name,
                   group: 'Equips',
                 })),
-                ...assignees.map((p) => ({
-                  value: `user:${p.id}`,
-                  label: displayName(p),
+                ...people.map(({ profile }) => ({
+                  value: `user:${profile.id}`,
+                  label: displayName(profile),
                   group: 'Persones',
                 })),
               ]}
@@ -201,7 +207,7 @@ export default async function TicketsPage({
             </button>
             {hasFilters && (
               <Link
-                href={buildHref({ estat: estats })}
+                href={buildHref(slug, { estat: estats })}
                 className="px-2 text-center text-sm font-semibold text-[var(--color-muted)]"
               >
                 Netejar
@@ -231,7 +237,7 @@ export default async function TicketsPage({
           Cap fitxa amb aquests filtres.
         </div>
       ) : (
-        <TicketList rows={rows} />
+        <TicketList slug={slug} rows={rows} />
       )}
     </div>
   )

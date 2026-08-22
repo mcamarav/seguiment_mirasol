@@ -2,19 +2,19 @@
 
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { createClient, getCurrentProfile } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import {
   canApprove,
   canCommentTicket,
   canCreateTickets,
   canEditTicket,
+  canManageProject,
   canMarkReviewed,
   canRequestReview,
-  isAdmin,
 } from '@/lib/permissions'
-import { buildTeamContext, toTeamsWithMembers } from '@/lib/teams'
-import type { Actor, Profile, ReviewActor, TicketImageField } from '@/lib/types'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { loadProjectContext, type ProjectContext } from '@/lib/project'
+import { projectPath } from '@/lib/routes'
+import type { Actor, ReviewActor, TicketImageField } from '@/lib/types'
 
 export interface FormState {
   error?: string
@@ -55,33 +55,64 @@ function parseAssignee(formData: FormData): { assignee_id: string | null; assign
   return { assignee_id: null, assignee_team_id: null }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function loadTeamContext(supabase: SupabaseClient<any>, profile: Profile) {
-  const { data } = await supabase
-    .from('teams')
-    .select('id, name, global_role, created_at, team_members(user_id)')
-  return buildTeamContext(toTeamsWithMembers(data ?? []), profile.id)
+/** Els camps de la fitxa que venen del formulari. El projecte no hi és mai: el
+ * d'una fitxa nova el diu la ruta, i el d'una que ja existeix no es pot canviar. */
+function ticketFields(formData: FormData) {
+  return {
+    description: optional(formData, 'description'),
+    zone_id: optionalId(formData, 'zone_id'),
+    work_type_id: optionalId(formData, 'work_type_id'),
+    agreed_solution: optional(formData, 'agreed_solution'),
+    due_date: optional(formData, 'due_date'),
+    ...parseAssignee(formData),
+  }
 }
 
-async function loadTicket(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any>,
+type TicketRow = {
+  id: number
+  ref: number
+  project_id: number
+  created_by: string | null
+  assignee_id: string | null
+  assignee_team_id: number | null
+  approved_responsable_at: string | null
+  review_tecnics_at: string | null
+  review_propietari_at: string | null
+  projects: { slug: string } | null
+}
+
+/** La fitxa i el context del seu projecte. El projecte no s'agafa mai del
+ * formulari: es deriva de la fitxa, i els permisos es tornen a calcular aquí.
+ * Si la fitxa no existeix (o l'RLS no la deixa veure) retorna null. */
+async function loadTicketContext(
   ticketId: number,
-) {
+): Promise<{ ticket: TicketRow; context: ProjectContext } | null> {
+  const supabase = await createClient()
   const { data } = await supabase
     .from('tickets')
     // El literal ha d'anar sencer en una sola línia: és el que fa servir el
     // client de Supabase per inferir el tipus de la fila.
-    .select('id, created_by, assignee_id, assignee_team_id, approved_responsable_at, review_tecnics_at, review_propietari_at')
+    .select('id, ref, project_id, created_by, assignee_id, assignee_team_id, approved_responsable_at, review_tecnics_at, review_propietari_at, projects(slug)')
     .eq('id', ticketId)
     .maybeSingle()
-  return data
+
+  const ticket = data as TicketRow | null
+  if (!ticket?.projects?.slug) return null
+
+  const context = await loadProjectContext(ticket.projects.slug)
+  return context ? { ticket, context } : null
+}
+
+function revalidateTicket(slug: string, ref: number): void {
+  revalidatePath(projectPath(slug))
+  revalidatePath(projectPath(slug, `/tickets/${ref}`))
 }
 
 export async function createTicket(_prev: FormState, formData: FormData): Promise<FormState> {
-  const profile = await getCurrentProfile()
-  if (!profile) return { error: 'Sessió caducada.' }
-  if (!canCreateTickets(profile)) return { error: 'No tens permís per crear fitxes.' }
+  const slug = String(formData.get('projecte') ?? '')
+  const context = await loadProjectContext(slug)
+  if (!context) return { error: 'Projecte no trobat o sense accés.' }
+  if (!canCreateTickets(context.access)) return { error: 'No tens permís per crear fitxes en aquest projecte.' }
 
   const title = String(formData.get('title') ?? '').trim()
   if (!title) return { error: 'El nom curt és obligatori.' }
@@ -89,66 +120,54 @@ export async function createTicket(_prev: FormState, formData: FormData): Promis
   const supabase = await createClient()
 
   // Sense `.select()`: això el convertiria en un INSERT ... RETURNING, i el
-  // RETURNING ha de passar la policy de lectura (can_comment_ticket). Aquestes
-  // funcions són STABLE, així que consulten la taula amb el snapshot d'abans de
-  // la inserció i no veuen la fila nova: no poden comprovar created_by =
-  // auth.uid() i Postgres avorta amb un error d'RLS. L'id es busca a part.
+  // RETURNING ha de passar la policy de lectura. Aquestes funcions són STABLE,
+  // així que consulten la taula amb el snapshot d'abans de la inserció i no
+  // veuen la fila nova: Postgres avorta amb un error d'RLS. El número es busca
+  // a part.
   const { error } = await supabase.from('tickets').insert({
+    project_id: context.project.id,
     title,
-    description: optional(formData, 'description'),
-    zone_id: optionalId(formData, 'zone_id'),
-    work_type_id: optionalId(formData, 'work_type_id'),
-    agreed_solution: optional(formData, 'agreed_solution'),
-    due_date: optional(formData, 'due_date'),
-    ...parseAssignee(formData),
+    ...ticketFields(formData),
   })
 
   if (error) return { error: error.message }
 
   const { data } = await supabase
     .from('tickets')
-    .select('id')
-    .eq('created_by', profile.id)
+    .select('ref')
+    .eq('project_id', context.project.id)
+    .eq('created_by', context.profile.id)
     .order('id', { ascending: false })
     .limit(1)
     .maybeSingle()
 
-  revalidatePath('/')
-  redirect(data ? `/tickets/${data.id}` : '/')
+  revalidatePath(projectPath(slug))
+  redirect(data ? projectPath(slug, `/tickets/${data.ref}`) : projectPath(slug))
 }
 
 export async function updateTicket(_prev: FormState, formData: FormData): Promise<FormState> {
-  const profile = await getCurrentProfile()
-  if (!profile) return { error: 'Sessió caducada.' }
-
   const id = Number(formData.get('id'))
   if (!id) return { error: 'Fitxa no vàlida.' }
 
-  const supabase = await createClient()
-  const ticket = await loadTicket(supabase, id)
-  if (!ticket) return { error: 'Fitxa no trobada.' }
-  if (!canEditTicket(profile, ticket)) return { error: 'No tens permís per editar aquesta fitxa.' }
+  const loaded = await loadTicketContext(id)
+  if (!loaded) return { error: 'Fitxa no trobada.' }
+  const { ticket, context } = loaded
+  if (!canEditTicket(context.access, ticket)) {
+    return { error: 'No tens permís per editar aquesta fitxa.' }
+  }
 
   const title = String(formData.get('title') ?? '').trim()
   if (!title) return { error: 'El nom curt és obligatori.' }
 
+  const supabase = await createClient()
   const { error } = await supabase
     .from('tickets')
-    .update({
-      title,
-      description: optional(formData, 'description'),
-      zone_id: optionalId(formData, 'zone_id'),
-      work_type_id: optionalId(formData, 'work_type_id'),
-      agreed_solution: optional(formData, 'agreed_solution'),
-      due_date: optional(formData, 'due_date'),
-      ...parseAssignee(formData),
-    })
+    .update({ title, ...ticketFields(formData) })
     .eq('id', id)
 
   if (error) return { error: error.message }
 
-  revalidatePath('/')
-  revalidatePath(`/tickets/${id}`)
+  revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
 }
 
@@ -162,18 +181,15 @@ export async function setApproval(
   actor: Actor,
   approve: boolean,
 ): Promise<FormState> {
-  const profile = await getCurrentProfile()
-  if (!profile) return { error: 'Sessió caducada.' }
+  const loaded = await loadTicketContext(ticketId)
+  if (!loaded) return { error: 'Fitxa no trobada.' }
+  const { ticket, context } = loaded
 
-  const supabase = await createClient()
-  const ticket = await loadTicket(supabase, ticketId)
-  if (!ticket) return { error: 'Fitxa no trobada.' }
-
-  const ctx = await loadTeamContext(supabase, profile)
-  if (!canApprove(actor, profile, ticket, ctx)) {
+  if (!canApprove(actor, context.access, ticket, context.teamCtx)) {
     return { error: 'No tens permís per canviar aquesta aprovació.' }
   }
 
+  const supabase = await createClient()
   const { error } = await supabase
     .from('tickets')
     .update({
@@ -185,8 +201,7 @@ export async function setApproval(
 
   if (error) return { error: error.message }
 
-  revalidatePath('/')
-  revalidatePath(`/tickets/${ticketId}`)
+  revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
 }
 
@@ -197,21 +212,18 @@ export async function setReview(
   actor: ReviewActor,
   request: boolean,
 ): Promise<FormState> {
-  const profile = await getCurrentProfile()
-  if (!profile) return { error: 'Sessió caducada.' }
+  const loaded = await loadTicketContext(ticketId)
+  if (!loaded) return { error: 'Fitxa no trobada.' }
+  const { ticket, context } = loaded
 
-  const supabase = await createClient()
-  const ticket = await loadTicket(supabase, ticketId)
-  if (!ticket) return { error: 'Fitxa no trobada.' }
-
-  const ctx = await loadTeamContext(supabase, profile)
-  if (!canRequestReview(actor, profile, ticket, ctx)) {
+  if (!canRequestReview(actor, context.access, ticket, context.teamCtx)) {
     return { error: 'No tens permís per demanar la revisió d’aquesta fitxa.' }
   }
   if (request && !ticket.approved_responsable_at) {
     return { error: 'Només es pot demanar revisió quan el responsable ha marcat la feina com a feta.' }
   }
 
+  const supabase = await createClient()
   const { error } = await supabase
     .from('tickets')
     .update({
@@ -222,8 +234,7 @@ export async function setReview(
 
   if (error) return { error: error.message }
 
-  revalidatePath('/')
-  revalidatePath(`/tickets/${ticketId}`)
+  revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
 }
 
@@ -231,21 +242,18 @@ export async function setReview(
  * les peticions de revisió i es reinicien les aprovacions del tècnic i del
  * propietari, que han de tornar a dir-hi la seva. */
 export async function markReviewed(ticketId: number): Promise<FormState> {
-  const profile = await getCurrentProfile()
-  if (!profile) return { error: 'Sessió caducada.' }
+  const loaded = await loadTicketContext(ticketId)
+  if (!loaded) return { error: 'Fitxa no trobada.' }
+  const { ticket, context } = loaded
 
-  const supabase = await createClient()
-  const ticket = await loadTicket(supabase, ticketId)
-  if (!ticket) return { error: 'Fitxa no trobada.' }
-
-  const ctx = await loadTeamContext(supabase, profile)
-  if (!canMarkReviewed(profile, ticket, ctx)) {
+  if (!canMarkReviewed(context.access, ticket, context.teamCtx)) {
     return { error: 'No tens permís per canviar aquesta aprovació.' }
   }
   if (!ticket.review_tecnics_at && !ticket.review_propietari_at) {
     return { error: 'Aquesta fitxa no està pendent de revisió.' }
   }
 
+  const supabase = await createClient()
   const { error } = await supabase
     .from('tickets')
     .update({
@@ -258,8 +266,7 @@ export async function markReviewed(ticketId: number): Promise<FormState> {
 
   if (error) return { error: error.message }
 
-  revalidatePath('/')
-  revalidatePath(`/tickets/${ticketId}`)
+  revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
 }
 
@@ -268,15 +275,11 @@ export async function createComment(
   body: string,
   imagePaths: string[],
 ): Promise<FormState> {
-  const profile = await getCurrentProfile()
-  if (!profile) return { error: 'Sessió caducada.' }
+  const loaded = await loadTicketContext(ticketId)
+  if (!loaded) return { error: 'Fitxa no trobada.' }
+  const { ticket, context } = loaded
 
-  const supabase = await createClient()
-  const ticket = await loadTicket(supabase, ticketId)
-  if (!ticket) return { error: 'Fitxa no trobada.' }
-
-  const ctx = await loadTeamContext(supabase, profile)
-  if (!canCommentTicket(profile, ticket, ctx)) {
+  if (!canCommentTicket(context.access, ticket, context.teamCtx)) {
     return { error: 'No tens permís per comentar aquesta fitxa.' }
   }
 
@@ -285,9 +288,10 @@ export async function createComment(
     return { error: 'Escriu un comentari o adjunta una imatge.' }
   }
 
+  const supabase = await createClient()
   const { data: comment, error } = await supabase
     .from('comments')
-    .insert({ ticket_id: ticketId, author_id: profile.id, body: text || null })
+    .insert({ ticket_id: ticketId, author_id: context.profile.id, body: text || null })
     .select('id')
     .single()
 
@@ -300,19 +304,20 @@ export async function createComment(
     if (imgError) return { error: `Comentari desat, però les imatges han fallat: ${imgError.message}` }
   }
 
-  revalidatePath('/')
-  revalidatePath(`/tickets/${ticketId}`)
+  revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
 }
 
-/** Esborra un comentari. L'RLS només ho permet a l'autor o a un admin. */
+/** Esborra un comentari. L'RLS només ho permet a l'autor o a qui administra el
+ * projecte. */
 export async function deleteComment(formData: FormData): Promise<void> {
-  const profile = await getCurrentProfile()
-  if (!profile) return
-
   const commentId = String(formData.get('comment_id') ?? '')
   const ticketId = Number(formData.get('ticket_id'))
   if (!commentId || !ticketId) return
+
+  const loaded = await loadTicketContext(ticketId)
+  if (!loaded) return
+  const { ticket, context } = loaded
 
   const supabase = await createClient()
 
@@ -329,7 +334,7 @@ export async function deleteComment(formData: FormData): Promise<void> {
     await supabase.storage.from('ticket-images').remove(paths)
   }
 
-  revalidatePath(`/tickets/${ticketId}`)
+  revalidateTicket(context.project.slug, ticket.ref)
 }
 
 /** Adjunta imatges ja pujades a Storage a la descripció o la solució proposada. */
@@ -338,41 +343,40 @@ export async function addFieldImages(
   field: TicketImageField,
   storagePaths: string[],
 ): Promise<FormState> {
-  const profile = await getCurrentProfile()
-  if (!profile) return { error: 'Sessió caducada.' }
   if (storagePaths.length === 0) return { ok: true }
 
-  const supabase = await createClient()
-  const ticket = await loadTicket(supabase, ticketId)
-  if (!ticket || !canEditTicket(profile, ticket)) {
+  const loaded = await loadTicketContext(ticketId)
+  if (!loaded) return { error: 'Fitxa no trobada.' }
+  const { ticket, context } = loaded
+  if (!canEditTicket(context.access, ticket)) {
     return { error: 'No tens permís per editar aquesta fitxa.' }
   }
 
+  const supabase = await createClient()
   const { error } = await supabase
     .from('ticket_field_images')
     .insert(storagePaths.map((storage_path) => ({ ticket_id: ticketId, field, storage_path })))
 
   if (error) return { error: error.message }
 
-  revalidatePath(`/tickets/${ticketId}`)
+  revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
 }
 
-/** Esborra una imatge adjunta a la descripció o la solució proposada. */
-/** L'esborrat el crida directament el component (no un <form>): dins del
+/** Esborra una imatge adjunta a la descripció o la solució proposada.
+ * L'esborrat el crida directament el component (no un <form>): dins del
  * formulari d'edició de la fitxa un form niat no és HTML vàlid. */
 export async function deleteFieldImage(imageId: string, ticketId: number): Promise<FormState> {
-  const profile = await getCurrentProfile()
-  if (!profile) return { error: 'Sessió caducada.' }
   if (!imageId || !ticketId) return { error: 'Imatge no vàlida.' }
 
-  const supabase = await createClient()
-  const ticket = await loadTicket(supabase, ticketId)
-  if (!ticket) return { error: 'Fitxa no trobada.' }
-  if (!canEditTicket(profile, ticket)) {
+  const loaded = await loadTicketContext(ticketId)
+  if (!loaded) return { error: 'Fitxa no trobada.' }
+  const { ticket, context } = loaded
+  if (!canEditTicket(context.access, ticket)) {
     return { error: 'No tens permís per editar aquesta fitxa.' }
   }
 
+  const supabase = await createClient()
   const { data: image } = await supabase
     .from('ticket_field_images')
     .select('storage_path')
@@ -386,20 +390,22 @@ export async function deleteFieldImage(imageId: string, ticketId: number): Promi
     await supabase.storage.from('ticket-images').remove([image.storage_path])
   }
 
-  revalidatePath(`/tickets/${ticketId}`)
+  revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
 }
 
 export async function deleteTicket(formData: FormData): Promise<void> {
-  const profile = await getCurrentProfile()
-  if (!profile || !isAdmin(profile)) return
-
   const id = Number(formData.get('id'))
   if (!id) return
+
+  const loaded = await loadTicketContext(id)
+  if (!loaded) return
+  const { context } = loaded
+  if (!canManageProject(context.access)) return
 
   const supabase = await createClient()
   await supabase.from('tickets').delete().eq('id', id)
 
-  revalidatePath('/')
-  redirect('/')
+  revalidatePath(projectPath(context.project.slug))
+  redirect(projectPath(context.project.slug))
 }

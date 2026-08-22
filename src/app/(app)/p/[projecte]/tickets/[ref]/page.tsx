@@ -1,8 +1,9 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { createClient, getCurrentProfile } from '@/lib/supabase/server'
-import { approvalsFor, canCommentTicket, canEditTicket, isAdmin } from '@/lib/permissions'
-import { buildTeamContext, toTeamsWithMembers } from '@/lib/teams'
+import { createClient } from '@/lib/supabase/server'
+import { approvalsFor, canCommentTicket, canEditTicket, canManageProject } from '@/lib/permissions'
+import { loadProjectContext, loadProjectPeople } from '@/lib/project'
+import { projectPath } from '@/lib/routes'
 import { displayName, formatDate, formatDateTime, ticketRef } from '@/lib/format'
 import { StatusBadge } from '@/components/StatusBadge'
 import { TicketForm } from '../TicketForm'
@@ -18,59 +19,56 @@ const SIGNED_URL_TTL = 60 * 60 // 1 hora
 export default async function TicketDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>
+  params: Promise<{ projecte: string; ref: string }>
 }) {
-  const { id: rawId } = await params
-  const id = Number(rawId)
-  if (!Number.isInteger(id)) notFound()
+  const { projecte, ref: rawRef } = await params
+  const ref = Number(rawRef)
+  if (!Number.isInteger(ref)) notFound()
 
-  const profile = await getCurrentProfile()
-  if (!profile) redirect('/entrar')
+  const context = await loadProjectContext(projecte)
+  if (!context) notFound()
+  const { project, access, teams, teamCtx } = context
 
   const supabase = await createClient()
 
-  const [
-    { data: ticket },
-    { data: comments },
-    { data: profiles },
-    { data: zones },
-    { data: workTypes },
-    { data: fieldImages },
-    { data: teamRows },
-  ] = await Promise.all([
-    supabase.from('tickets').select('*').eq('id', id).maybeSingle(),
-    supabase
-      .from('comments')
-      .select('id, ticket_id, author_id, body, created_at, comment_images(id, comment_id, storage_path, created_at)')
-      .eq('ticket_id', id)
-      .order('created_at', { ascending: true }),
-    supabase.from('profiles').select('id, email, full_name, is_admin, can_create, can_edit_all, created_at'),
-    supabase.from('zones').select('*').order('sort_order'),
-    supabase.from('work_types').select('*').order('sort_order'),
-    supabase
-      .from('ticket_field_images')
-      .select('id, ticket_id, field, storage_path, created_at')
-      .eq('ticket_id', id)
-      .order('created_at', { ascending: true }),
-    supabase.from('teams').select('id, name, global_role, created_at, team_members(user_id)'),
-  ])
+  // La fitxa es busca pel número dins del projecte (#007), no per l'id global.
+  const { data: ticket } = await supabase
+    .from('tickets')
+    .select('*')
+    .eq('project_id', project.id)
+    .eq('ref', ref)
+    .maybeSingle()
 
   if (!ticket) notFound()
-
   const t = ticket as Ticket
+
+  const [{ data: comments }, { data: zones }, { data: workTypes }, { data: fieldImages }, people] =
+    await Promise.all([
+      supabase
+        .from('comments')
+        .select('id, ticket_id, author_id, body, created_at, comment_images(id, comment_id, storage_path, created_at)')
+        .eq('ticket_id', t.id)
+        .order('created_at', { ascending: true }),
+      supabase.from('zones').select('*').eq('project_id', project.id).order('sort_order'),
+      supabase.from('work_types').select('*').eq('project_id', project.id).order('sort_order'),
+      supabase
+        .from('ticket_field_images')
+        .select('id, ticket_id, field, storage_path, created_at')
+        .eq('ticket_id', t.id)
+        .order('created_at', { ascending: true }),
+      loadProjectPeople(project.id),
+    ])
+
   const allComments = (comments ?? []) as Comment[]
-  const people = new Map<string, Profile>(
-    ((profiles ?? []) as Profile[]).map((p) => [p.id, p]),
-  )
+  const profiles = people.map((p) => p.profile)
+  const peopleById = new Map<string, Profile>(profiles.map((p) => [p.id, p]))
   const zoneList = (zones ?? []) as Zone[]
   const typeList = (workTypes ?? []) as WorkType[]
-  const teams = toTeamsWithMembers(teamRows ?? [])
   const teamName = (teamId: number | null) => teams.find((tm) => tm.id === teamId)?.name ?? null
-  const ctx = buildTeamContext(teams, profile.id)
   const allFieldImages = (fieldImages ?? []) as TicketFieldImage[]
-  const canEdit = canEditTicket(profile, t)
-  const canComment = canCommentTicket(profile, t, ctx)
-  const approvals = approvalsFor(profile, t, ctx)
+  const canEdit = canEditTicket(access, t)
+  const canComment = canCommentTicket(access, t, teamCtx)
+  const approvals = approvalsFor(access, t, teamCtx)
 
   // Signed URLs per a totes les imatges d'un sol cop (el bucket és privat).
   const allPaths = [
@@ -97,12 +95,15 @@ export default async function TicketDetailPage({
 
   const zoneName = zoneList.find((z) => z.id === t.zone_id)?.name ?? 'Sense zona'
   const typeName = typeList.find((w) => w.id === t.work_type_id)?.name ?? 'Sense tipus'
-  const nameOf = (uid: string | null) => (uid ? displayName(people.get(uid) ?? null) : null)
+  const nameOf = (uid: string | null) => (uid ? displayName(peopleById.get(uid) ?? null) : null)
   const assignedTo = nameOf(t.assignee_id) ?? (t.assignee_team_id ? `Equip ${teamName(t.assignee_team_id)}` : null)
 
   return (
     <div className="space-y-4">
-      <Link href="/" className="inline-block text-sm font-semibold text-[var(--color-muted)]">
+      <Link
+        href={projectPath(project.slug)}
+        className="inline-block text-sm font-semibold text-[var(--color-muted)]"
+      >
         ← Totes les fitxes
       </Link>
 
@@ -110,7 +111,7 @@ export default async function TicketDetailPage({
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <p className="font-mono text-xs font-semibold text-[var(--color-muted)]">
-              {ticketRef(t.id)}
+              {ticketRef(t.ref)}
             </p>
             <h1 className="mt-1 text-xl font-bold tracking-tight">{t.title}</h1>
             <p className="mt-1.5 text-sm text-[var(--color-muted)]">
@@ -205,9 +206,10 @@ export default async function TicketDetailPage({
           <summary className="cursor-pointer font-semibold">Editar la fitxa</summary>
           <div className="mt-3">
             <TicketForm
+              slug={project.slug}
               zones={zoneList}
               workTypes={typeList}
-              assignees={(profiles ?? []) as Profile[]}
+              assignees={profiles}
               teams={teams}
               ticket={t}
               descriptionImages={imagesFor('description')}
@@ -233,8 +235,8 @@ export default async function TicketDetailPage({
 
         <ul className="space-y-3">
           {allComments.map((c) => {
-            const author = people.get(c.author_id) ?? null
-            const canDelete = c.author_id === profile.id || isAdmin(profile)
+            const author = peopleById.get(c.author_id) ?? null
+            const canDelete = c.author_id === access.userId || canManageProject(access)
             return (
               <li key={c.id} className="card p-4">
                 <div className="flex items-baseline gap-2">
@@ -293,7 +295,7 @@ export default async function TicketDetailPage({
         )}
       </section>
 
-      {isAdmin(profile) && (
+      {canManageProject(access) && (
         <form action={deleteTicket} className="pt-4 text-right">
           <input type="hidden" name="id" value={t.id} />
           <SubmitButton className="text-sm font-semibold text-red-700" pendingLabel="Esborrant…">

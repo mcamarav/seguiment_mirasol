@@ -1,22 +1,31 @@
-import { redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { createClient, getCurrentProfile } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { canCreateTickets } from '@/lib/permissions'
-import { toTeamsWithMembers } from '@/lib/teams'
+import { loadProjectContext, loadProjectPeople } from '@/lib/project'
+import { projectPath } from '@/lib/routes'
 import { TicketForm } from '../TicketForm'
-import type { Profile, WorkType, Zone } from '@/lib/types'
+import type { WorkType, Zone } from '@/lib/types'
 
-export default async function NovaFitxaPage() {
-  const profile = await getCurrentProfile()
-  if (!profile) redirect('/entrar')
-  if (!canCreateTickets(profile)) {
+export default async function NovaFitxaPage({
+  params,
+}: {
+  params: Promise<{ projecte: string }>
+}) {
+  const { projecte } = await params
+  const context = await loadProjectContext(projecte)
+  if (!context) notFound()
+
+  const { project, access, teams } = context
+
+  if (!canCreateTickets(access)) {
     return (
       <div className="card p-6">
         <h1 className="text-lg font-bold">Nova fitxa</h1>
         <p className="mt-2 text-sm text-[var(--color-muted)]">
-          No tens permís per crear fitxes. Parla amb l’administrador.
+          No tens permís per crear fitxes en aquest projecte. Parla amb qui l’administra.
         </p>
-        <Link href="/" className="btn btn-secondary mt-4">
+        <Link href={projectPath(project.slug)} className="btn btn-secondary mt-4">
           Tornar
         </Link>
       </div>
@@ -24,26 +33,29 @@ export default async function NovaFitxaPage() {
   }
 
   const supabase = await createClient()
-  const [{ data: zones }, { data: workTypes }, { data: profiles }, { data: teamRows }] = await Promise.all([
-    supabase.from('zones').select('*').eq('active', true).order('sort_order'),
-    supabase.from('work_types').select('*').eq('active', true).order('sort_order'),
-    supabase.from('profiles').select('id, email, full_name, is_admin, can_create, can_edit_all, created_at'),
-    supabase.from('teams').select('id, name, global_role, created_at, team_members(user_id)'),
+  const [{ data: zones }, { data: workTypes }, people] = await Promise.all([
+    supabase.from('zones').select('*').eq('project_id', project.id).eq('active', true).order('sort_order'),
+    supabase.from('work_types').select('*').eq('project_id', project.id).eq('active', true).order('sort_order'),
+    loadProjectPeople(project.id),
   ])
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <h1 className="mr-auto text-xl font-bold tracking-tight">Nova fitxa</h1>
-        <Link href="/" className="text-sm font-semibold text-[var(--color-muted)]">
+        <Link
+          href={projectPath(project.slug)}
+          className="text-sm font-semibold text-[var(--color-muted)]"
+        >
           Cancel·lar
         </Link>
       </div>
       <TicketForm
+        slug={project.slug}
         zones={(zones ?? []) as Zone[]}
         workTypes={(workTypes ?? []) as WorkType[]}
-        assignees={(profiles ?? []) as Profile[]}
-        teams={toTeamsWithMembers(teamRows ?? [])}
+        assignees={people.map((p) => p.profile)}
+        teams={teams}
       />
     </div>
   )

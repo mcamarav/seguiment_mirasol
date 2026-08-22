@@ -3,66 +3,124 @@
 import { revalidatePath } from 'next/cache'
 import { createClient, getCurrentProfile } from '@/lib/supabase/server'
 import { isAdmin } from '@/lib/permissions'
-import type { GlobalTeamRole } from '@/lib/types'
+import { slugify } from '@/lib/routes'
+import type { Profile } from '@/lib/types'
 
-type Table = 'zones' | 'work_types'
-
-async function requireAdmin() {
+/** Aquesta pantalla és de l'administrador de la instal·lació: projectes, comptes
+ * i invitacions. Els permisos de dins de cada projecte es reparteixen a
+ * /p/[projecte]/admin. */
+async function requireAdmin(): Promise<Profile> {
   const profile = await getCurrentProfile()
   if (!profile || !isAdmin(profile)) throw new Error('Cal ser administrador.')
   return profile
 }
 
-function tableOf(formData: FormData): Table {
-  const table = String(formData.get('table') ?? '')
-  if (table !== 'zones' && table !== 'work_types') throw new Error('Taula no vàlida.')
-  return table
+function refresh(): void {
+  revalidatePath('/admin')
+  revalidatePath('/', 'layout')
 }
 
-/** Permisos globals d'un usuari: administrador, pot crear fitxes, pot editar-les totes. */
-export async function setUserCapabilities(formData: FormData): Promise<void> {
+// -----------------------------------------------------------------------------
+// Projectes
+// -----------------------------------------------------------------------------
+
+/** Crea un projecte i li sembra les zones i els tipus per defecte. El slug surt
+ * del nom i és el que quedarà a la URL per sempre. */
+export async function createProject(formData: FormData): Promise<void> {
   await requireAdmin()
+
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return
+
+  const base = slugify(String(formData.get('slug') ?? '') || name)
+  if (!base) return
+
+  const supabase = await createClient()
+
+  // Si el slug ja existeix se li posa un sufix: -2, -3…
+  const { data: taken } = await supabase.from('projects').select('slug').like('slug', `${base}%`)
+  const used = new Set(((taken ?? []) as { slug: string }[]).map((p) => p.slug))
+  let slug = base
+  for (let i = 2; used.has(slug); i += 1) slug = `${base}-${i}`
+
+  const { data, error } = await supabase
+    .from('projects')
+    .insert({ slug, name })
+    .select('id')
+    .single()
+
+  if (error || !data) return
+
+  await supabase.rpc('seed_project_catalogs', { p_project_id: data.id })
+
+  refresh()
+}
+
+/** Amaga o recupera un projecte: deixa de sortir al selector, però no s'esborra
+ * res i qui hi tenia accés hi pot continuar entrant per l'enllaç. */
+export async function setProjectActive(formData: FormData): Promise<void> {
+  await requireAdmin()
+
+  const id = Number(formData.get('id'))
+  const active = String(formData.get('active')) === 'true'
+  if (!id) return
+
+  const supabase = await createClient()
+  await supabase.from('projects').update({ active: !active }).eq('id', id)
+
+  refresh()
+}
+
+/** Esborra un projecte, i només si està buit: amb fitxes a dins s'ho enduria tot
+ * (comentaris i imatges inclosos) i no hi ha manera de desfer-ho. */
+export async function deleteProject(formData: FormData): Promise<void> {
+  await requireAdmin()
+
+  const id = Number(formData.get('id'))
+  if (!id) return
+
+  const supabase = await createClient()
+  const { count } = await supabase
+    .from('tickets')
+    .select('id', { count: 'exact', head: true })
+    .eq('project_id', id)
+
+  if ((count ?? 0) > 0) return
+
+  await supabase.from('projects').delete().eq('id', id)
+
+  refresh()
+}
+
+// -----------------------------------------------------------------------------
+// Comptes
+// -----------------------------------------------------------------------------
+
+/** Administrador de la instal·lació: ho pot fer tot a tots els projectes. */
+export async function setUserAdmin(formData: FormData): Promise<void> {
+  const me = await requireAdmin()
 
   const userId = String(formData.get('user_id') ?? '')
   if (!userId) return
+  // Treure's un mateix l'administració deixaria la instal·lació sense ningú que
+  // hi pugui entrar si és l'únic administrador; és més senzill no permetre-ho.
+  if (userId === me.id) return
 
   const supabase = await createClient()
   await supabase
     .from('profiles')
-    .update({
-      is_admin: formData.get('is_admin') === 'on',
-      can_create: formData.get('can_create') === 'on',
-      can_edit_all: formData.get('can_edit_all') === 'on',
-    })
+    .update({ is_admin: formData.get('is_admin') === 'on' })
     .eq('id', userId)
 
-  revalidatePath('/admin')
-  revalidatePath('/', 'layout')
+  refresh()
 }
 
-/** Substitueix tots els equips d'un usuari pels seleccionats al multiselect. */
-export async function setUserTeams(formData: FormData): Promise<void> {
-  await requireAdmin()
+// -----------------------------------------------------------------------------
+// Convidats
+// -----------------------------------------------------------------------------
 
-  const userId = String(formData.get('user_id') ?? '')
-  if (!userId) return
-  const teamIds = formData
-    .getAll('team_ids')
-    .map((v) => Number(v))
-    .filter((n) => Number.isFinite(n) && n > 0)
-
-  const supabase = await createClient()
-  await supabase.from('team_members').delete().eq('user_id', userId)
-  if (teamIds.length > 0) {
-    await supabase.from('team_members').insert(teamIds.map((team_id) => ({ team_id, user_id: userId })))
-  }
-
-  revalidatePath('/admin')
-  revalidatePath('/', 'layout')
-}
-
-/** Autoritza un correu a registrar-se, amb els equips (opcionals) que se li
- * donaran automàticament quan es registri. */
+/** Autoritza un correu a registrar-se, amb els projectes (opcionals) als quals
+ * tindrà accés quan es registri. */
 export async function inviteEmail(formData: FormData): Promise<void> {
   const admin = await requireAdmin()
 
@@ -71,8 +129,9 @@ export async function inviteEmail(formData: FormData): Promise<void> {
     .toLowerCase()
   const note = String(formData.get('note') ?? '').trim() || null
   const is_admin = formData.get('is_admin') === 'on'
-  const teamIds = formData
-    .getAll('team_ids')
+  const canCreate = formData.get('can_create') === 'on'
+  const projectIds = formData
+    .getAll('project_ids')
     .map((v) => Number(v))
     .filter((n) => Number.isFinite(n) && n > 0)
 
@@ -83,28 +142,34 @@ export async function inviteEmail(formData: FormData): Promise<void> {
     .from('invitations')
     .upsert({ email, is_admin, note, invited_by: admin.id }, { onConflict: 'email' })
 
-  await supabase.from('invitation_teams').delete().eq('email', email)
-  if (teamIds.length > 0) {
-    await supabase.from('invitation_teams').insert(teamIds.map((team_id) => ({ email, team_id })))
+  await supabase.from('invitation_projects').delete().eq('email', email)
+  if (projectIds.length > 0) {
+    await supabase.from('invitation_projects').insert(
+      projectIds.map((project_id) => ({ email, project_id, can_create: canCreate })),
+    )
   }
 
   revalidatePath('/admin')
 }
 
-/** Edita els equips pre-assignats a una invitació encara pendent. */
-export async function toggleInvitationTeam(formData: FormData): Promise<void> {
+/** Afegeix o treu un projecte d'una invitació encara pendent. */
+export async function toggleInvitationProject(formData: FormData): Promise<void> {
   await requireAdmin()
 
   const email = String(formData.get('email') ?? '').trim().toLowerCase()
-  const teamId = Number(formData.get('team_id'))
-  const isMember = String(formData.get('is_member')) === 'true'
-  if (!email || !teamId) return
+  const projectId = Number(formData.get('project_id'))
+  const hasAccess = String(formData.get('has_access')) === 'true'
+  if (!email || !projectId) return
 
   const supabase = await createClient()
-  if (isMember) {
-    await supabase.from('invitation_teams').delete().eq('email', email).eq('team_id', teamId)
+  if (hasAccess) {
+    await supabase
+      .from('invitation_projects')
+      .delete()
+      .eq('email', email)
+      .eq('project_id', projectId)
   } else {
-    await supabase.from('invitation_teams').upsert({ email, team_id: teamId })
+    await supabase.from('invitation_projects').upsert({ email, project_id: projectId })
   }
 
   revalidatePath('/admin')
@@ -121,129 +186,4 @@ export async function revokeInvitation(formData: FormData): Promise<void> {
   await supabase.from('invitations').delete().eq('email', email)
 
   revalidatePath('/admin')
-}
-
-export async function addCatalogItem(formData: FormData): Promise<void> {
-  await requireAdmin()
-  const table = tableOf(formData)
-
-  const name = String(formData.get('name') ?? '').trim()
-  if (!name) return
-
-  const supabase = await createClient()
-  await supabase.from(table).insert({ name, sort_order: 500 })
-
-  revalidatePath('/admin')
-  revalidatePath('/')
-}
-
-export async function toggleCatalogItem(formData: FormData): Promise<void> {
-  await requireAdmin()
-  const table = tableOf(formData)
-
-  const id = Number(formData.get('id'))
-  const active = String(formData.get('active')) === 'true'
-  if (!id) return
-
-  const supabase = await createClient()
-  await supabase.from(table).update({ active: !active }).eq('id', id)
-
-  revalidatePath('/admin')
-  revalidatePath('/')
-}
-
-export async function renameCatalogItem(formData: FormData): Promise<void> {
-  await requireAdmin()
-  const table = tableOf(formData)
-
-  const id = Number(formData.get('id'))
-  const name = String(formData.get('name') ?? '').trim()
-  if (!id || !name) return
-
-  const supabase = await createClient()
-  await supabase.from(table).update({ name }).eq('id', id)
-
-  revalidatePath('/admin')
-  revalidatePath('/')
-}
-
-/** Crea un equip nou, sense cap membre. */
-export async function createTeam(formData: FormData): Promise<void> {
-  await requireAdmin()
-
-  const name = String(formData.get('name') ?? '').trim()
-  if (!name) return
-
-  const supabase = await createClient()
-  await supabase.from('teams').insert({ name })
-
-  revalidatePath('/admin')
-  revalidatePath('/')
-}
-
-export async function renameTeam(formData: FormData): Promise<void> {
-  await requireAdmin()
-
-  const id = Number(formData.get('id'))
-  const name = String(formData.get('name') ?? '').trim()
-  if (!id || !name) return
-
-  const supabase = await createClient()
-  await supabase.from('teams').update({ name }).eq('id', id)
-
-  revalidatePath('/admin')
-  revalidatePath('/')
-}
-
-/** L'equip que aprova globalment (a totes les fitxes) la casella de tècnics o
- * propietaris. Com a molt un equip pot tenir cada rol — assignar-lo el treu
- * automàticament de qualsevol altre equip que el tingués. */
-export async function setTeamGlobalRole(formData: FormData): Promise<void> {
-  await requireAdmin()
-
-  const id = Number(formData.get('id'))
-  const raw = String(formData.get('global_role') ?? '')
-  const global_role: GlobalTeamRole | null = raw === 'tecnics' || raw === 'propietaris' ? raw : null
-  if (!id) return
-
-  const supabase = await createClient()
-  if (global_role) {
-    await supabase.from('teams').update({ global_role: null }).eq('global_role', global_role)
-  }
-  await supabase.from('teams').update({ global_role }).eq('id', id)
-
-  revalidatePath('/admin')
-  revalidatePath('/')
-}
-
-export async function deleteTeam(formData: FormData): Promise<void> {
-  await requireAdmin()
-
-  const id = Number(formData.get('id'))
-  if (!id) return
-
-  const supabase = await createClient()
-  await supabase.from('teams').delete().eq('id', id)
-
-  revalidatePath('/admin')
-  revalidatePath('/')
-}
-
-export async function toggleTeamMembership(formData: FormData): Promise<void> {
-  await requireAdmin()
-
-  const teamId = Number(formData.get('team_id'))
-  const userId = String(formData.get('user_id') ?? '')
-  const isMember = String(formData.get('is_member')) === 'true'
-  if (!teamId || !userId) return
-
-  const supabase = await createClient()
-  if (isMember) {
-    await supabase.from('team_members').delete().eq('team_id', teamId).eq('user_id', userId)
-  } else {
-    await supabase.from('team_members').upsert({ team_id: teamId, user_id: userId })
-  }
-
-  revalidatePath('/admin')
-  revalidatePath('/', 'layout')
 }

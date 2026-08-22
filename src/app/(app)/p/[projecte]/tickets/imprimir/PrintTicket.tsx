@@ -21,7 +21,7 @@ export function PrintTicket({
   return (
     <div className="print-ticket">
       <div className="print-ticket-head">
-        <span className="print-ticket-ref">{ticketRef(t.id)}</span>
+        <span className="print-ticket-ref">{ticketRef(t.ref)}</span>
         <h2 className="print-ticket-title">{t.title}</h2>
         <span className="print-status">{STAGE_LABELS[stageOf(t)]}</span>
       </div>

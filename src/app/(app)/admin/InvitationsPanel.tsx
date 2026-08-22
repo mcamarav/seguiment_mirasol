@@ -1,16 +1,17 @@
 import { formatDate } from '@/lib/format'
-import { inviteEmail, revokeInvitation, toggleInvitationTeam } from './actions'
+import { inviteEmail, revokeInvitation, toggleInvitationProject } from './actions'
 import { SubmitButton } from '@/components/SubmitButton'
-import type { Invitation, TeamWithMembers } from '@/lib/types'
+import type { Invitation, Project } from '@/lib/types'
 
 export function InvitationsPanel({
   invitations,
-  teams,
-  invitationTeams,
+  projects,
+  invitationProjects,
 }: {
   invitations: Invitation[]
-  teams: TeamWithMembers[]
-  invitationTeams: Map<string, number[]>
+  projects: Project[]
+  /** Projectes pre-assignats a cada invitació pendent, per correu. */
+  invitationProjects: Map<string, number[]>
 }) {
   const pending = invitations.filter((i) => !i.accepted_at)
   const used = invitations.filter((i) => i.accepted_at)
@@ -20,9 +21,9 @@ export function InvitationsPanel({
       <h2 className="font-semibold">Convidats</h2>
       <p className="mt-1 text-xs text-[var(--color-muted)]">
         Només es pot registrar qui tingui el correu autoritzat aquí. Passa-li l’enllaç de l’app i
-        ja es crearà la contrasenya ell mateix. Pots pre-assignar-li equips ara mateix: se li
-        donaran automàticament en registrar-se, i els pots canviar mentre la invitació segueixi
-        pendent.
+        ja es crearà la contrasenya ell mateix. Els projectes que marquis se li donaran en
+        registrar-se, i els pots canviar mentre la invitació segueixi pendent. La resta de
+        permisos (administrar, editar-ho tot) i els equips es reparteixen dins de cada projecte.
       </p>
 
       <form action={inviteEmail} className="mt-3 grid gap-2 sm:grid-cols-[1.6fr_auto_auto]">
@@ -47,17 +48,21 @@ export function InvitationsPanel({
           placeholder="Nota opcional (p. ex. «arquitecte», «paleta»)"
           aria-label="Nota"
         />
-        {teams.length > 0 && (
+        {projects.length > 0 && (
           <div className="sm:col-span-3">
-            <p className="field-label">Equips (opcional)</p>
+            <p className="field-label">Projectes als quals tindrà accés</p>
             <div className="flex flex-wrap gap-3">
-              {teams.map((t) => (
-                <label key={t.id} className="flex items-center gap-1.5 text-xs font-semibold">
-                  <input type="checkbox" name="team_ids" value={t.id} />
-                  {t.name}
+              {projects.map((p) => (
+                <label key={p.id} className="flex items-center gap-1.5 text-xs font-semibold">
+                  <input type="checkbox" name="project_ids" value={p.id} />
+                  {p.name}
                 </label>
               ))}
             </div>
+            <label className="mt-2 flex items-center gap-1.5 text-xs font-semibold">
+              <input type="checkbox" name="can_create" />
+              Hi podrà crear fitxes
+            </label>
           </div>
         )}
       </form>
@@ -68,7 +73,7 @@ export function InvitationsPanel({
       ) : (
         <ul className="divide-y divide-[var(--color-line)]">
           {pending.map((inv) => {
-            const memberTeamIds = invitationTeams.get(inv.email) ?? []
+            const accessIds = invitationProjects.get(inv.email) ?? []
             return (
               <li key={inv.email} className="flex flex-wrap items-center gap-2 py-2.5">
                 <div className="min-w-0 flex-1">
@@ -77,25 +82,29 @@ export function InvitationsPanel({
                     {inv.is_admin ? 'Administrador' : 'Membre'}
                     {inv.note ? ` · ${inv.note}` : ''} · convidat el {formatDate(inv.created_at)}
                   </p>
-                  {teams.length > 0 && (
+                  {projects.length > 0 && (
                     <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                      {teams.map((t) => {
-                        const isMember = memberTeamIds.includes(t.id)
+                      {projects.map((p) => {
+                        const hasAccess = accessIds.includes(p.id)
                         return (
-                          <li key={t.id}>
-                            <form action={toggleInvitationTeam}>
+                          <li key={p.id}>
+                            <form action={toggleInvitationProject}>
                               <input type="hidden" name="email" value={inv.email} />
-                              <input type="hidden" name="team_id" value={t.id} />
-                              <input type="hidden" name="is_member" value={String(isMember)} />
+                              <input type="hidden" name="project_id" value={p.id} />
+                              <input
+                                type="hidden"
+                                name="has_access"
+                                value={String(hasAccess)}
+                              />
                               <SubmitButton
                                 className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                                  isMember
+                                  hasAccess
                                     ? 'border-[var(--color-brand)] bg-[var(--color-brand-soft)] text-[var(--color-brand)]'
                                     : 'border-[var(--color-line)] text-[var(--color-muted)]'
                                 }`}
                                 pendingLabel="…"
                               >
-                                {t.name}
+                                {p.name}
                               </SubmitButton>
                             </form>
                           </li>
@@ -130,8 +139,8 @@ export function InvitationsPanel({
             ))}
           </ul>
           <p className="mt-2 text-xs text-[var(--color-muted)]">
-            Per canviar-los els permisos o els equips, fes-ho a <strong>Usuaris i permisos</strong>{' '}
-            i <strong>Equips</strong> — la invitació ja només serveix d’històric.
+            Per canviar-los els accessos, ve a <strong>Comptes</strong> o a l’administració del
+            projecte — la invitació ja només serveix d’històric.
           </p>
         </>
       )}

@@ -3,13 +3,14 @@
 import { useActionState } from 'react'
 import { createTicket, updateTicket, type FormState } from './actions'
 import { displayName } from '@/lib/format'
-import { FieldImages } from './[id]/FieldImages'
+import { FieldImages } from './[ref]/FieldImages'
 import { SubmitButton } from '@/components/SubmitButton'
 import type { Profile, Team, Ticket, WorkType, Zone } from '@/lib/types'
 
 type ImageRef = { id: string; url: string }
 
 export function TicketForm({
+  slug,
   zones,
   workTypes,
   assignees,
@@ -18,6 +19,8 @@ export function TicketForm({
   descriptionImages = [],
   solutionImages = [],
 }: {
+  /** Slug del projecte: el necessita `createTicket` per saber a quina obra va. */
+  slug: string
   zones: Zone[]
   workTypes: WorkType[]
   assignees: Profile[]
@@ -42,6 +45,7 @@ export function TicketForm({
 
   return (
     <form action={formAction} className="card space-y-4 p-4">
+      <input type="hidden" name="projecte" value={slug} />
       {ticket && <input type="hidden" name="id" value={ticket.id} />}
 
       <div>

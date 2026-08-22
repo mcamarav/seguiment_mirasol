@@ -1,34 +1,37 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
-import { createClient, getCurrentProfile } from '@/lib/supabase/server'
+import { notFound } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { loadProjectContext, loadProjectPeople } from '@/lib/project'
 import { displayName, formatDate } from '@/lib/format'
 import { describeFilters, hrefFor, parseTicketFilters, ticketListQuery } from '../../ticket-filters'
 import { PrintButton } from './PrintButton'
 import { PrintTicket } from './PrintTicket'
 import './print.css'
-import type { Profile, TicketFieldImage, TicketListRow, WorkType, Zone } from '@/lib/types'
+import type { TicketFieldImage, TicketListRow, WorkType, Zone } from '@/lib/types'
 
 const SIGNED_URL_TTL = 60 * 60 // 1 hora
 
 export default async function ImprimirPage({
+  params,
   searchParams,
 }: {
+  params: Promise<{ projecte: string }>
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const profile = await getCurrentProfile()
-  if (!profile) redirect('/entrar')
+  const { projecte } = await params
+  const context = await loadProjectContext(projecte)
+  if (!context) notFound()
+  const { project, teams } = context
 
   const filters = parseTicketFilters(await searchParams)
   const supabase = await createClient()
 
-  const [{ data: tickets }, { data: zones }, { data: workTypes }, { data: profiles }, { data: teamRows }] =
-    await Promise.all([
-      ticketListQuery(supabase, filters),
-      supabase.from('zones').select('*').order('sort_order'),
-      supabase.from('work_types').select('*').order('sort_order'),
-      supabase.from('profiles').select('id, email, full_name, is_admin, can_create, can_edit_all, created_at'),
-      supabase.from('teams').select('id, name'),
-    ])
+  const [{ data: tickets }, { data: zones }, { data: workTypes }, people] = await Promise.all([
+    ticketListQuery(supabase, project.id, filters),
+    supabase.from('zones').select('*').eq('project_id', project.id).order('sort_order'),
+    supabase.from('work_types').select('*').eq('project_id', project.id).order('sort_order'),
+    loadProjectPeople(project.id),
+  ])
 
   const rows = (tickets ?? []) as TicketListRow[]
 
@@ -76,16 +79,14 @@ export default async function ImprimirPage({
     (id) =>
       (workTypes as WorkType[] | null)?.filter((w) => String(w.id) === id).map((w) => w.name) ?? [],
   )
-  const teamList = (teamRows ?? []) as { id: number; name: string }[]
-  const people = (profiles ?? []) as Profile[]
   const assigneeNames = filters.assignat.flatMap((value) => {
     if (value.startsWith('team:')) {
-      const team = teamList.find((t) => String(t.id) === value.slice(5))
+      const team = teams.find((t) => String(t.id) === value.slice(5))
       return team ? [`Equip ${team.name}`] : []
     }
     if (value.startsWith('user:')) {
-      const person = people.find((p) => p.id === value.slice(5))
-      return person ? [displayName(person)] : []
+      const person = people.find((p) => p.profile.id === value.slice(5))
+      return person ? [displayName(person.profile)] : []
     }
     return []
   })
@@ -93,7 +94,10 @@ export default async function ImprimirPage({
   return (
     <div className="space-y-4">
       <div className="no-print flex flex-wrap items-center gap-3">
-        <Link href={hrefFor(filters)} className="mr-auto text-sm font-semibold text-[var(--color-muted)]">
+        <Link
+          href={hrefFor(project.slug, filters)}
+          className="mr-auto text-sm font-semibold text-[var(--color-muted)]"
+        >
           ← Tornar a la llista
         </Link>
         <PrintButton />
@@ -106,7 +110,7 @@ export default async function ImprimirPage({
 
       <div className="print-sheet">
         <header className="print-doc-head">
-          <h1 className="print-doc-title">Seguiment Mirasol · Fitxes</h1>
+          <h1 className="print-doc-title">{project.name} · Fitxes</h1>
           <p className="print-doc-meta">
             {describeFilters(filters, zoneNames, typeNames, assigneeNames)}
           </p>

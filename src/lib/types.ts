@@ -9,14 +9,34 @@ export type Actor = 'responsable' | 'tecnics' | 'propietari'
 /** Els dos actors que, en lloc d'aprovar, poden demanar que es revisi la feina. */
 export type ReviewActor = Exclude<Actor, 'responsable'>
 
-/** Equip global que aprova aquella casella arreu, no només a les fitxes assignades. */
+/** Equip que aprova aquella casella a totes les fitxes del seu projecte, no
+ * només a les que té assignades. */
 export type GlobalTeamRole = 'tecnics' | 'propietaris'
 
+/** El compte. `is_admin` és l'administrador de la instal·lació: l'únic permís
+ * que no depèn del projecte. La resta viuen a `ProjectMember`. */
 export interface Profile {
   id: string
   email: string
   full_name: string | null
   is_admin: boolean
+  created_at: string
+}
+
+/** Una obra. El `slug` és el que surt a la URL: /p/mirasol. */
+export interface Project {
+  id: number
+  slug: string
+  name: string
+  active: boolean
+  created_at: string
+}
+
+/** Permisos d'una persona DINS d'un projecte. Sense fila no hi té accés. */
+export interface ProjectMember {
+  project_id: number
+  user_id: string
+  is_manager: boolean
   can_create: boolean
   can_edit_all: boolean
   created_at: string
@@ -32,8 +52,18 @@ export interface Invitation {
   accepted_by: string | null
 }
 
+/** Accés a un projecte pre-assignat a una invitació encara pendent. */
+export interface InvitationProject {
+  email: string
+  project_id: number
+  is_manager: boolean
+  can_create: boolean
+  can_edit_all: boolean
+}
+
 export interface Team {
   id: number
+  project_id: number
   name: string
   global_role: GlobalTeamRole | null
   created_at: string
@@ -46,6 +76,7 @@ export interface TeamWithMembers extends Team {
 
 export interface Zone {
   id: number
+  project_id: number
   name: string
   sort_order: number
   active: boolean
@@ -55,6 +86,10 @@ export type WorkType = Zone
 
 export interface TicketListRow {
   id: number
+  project_id: number
+  project_slug: string
+  /** Número dins del projecte: el #001 que es mostra. */
+  ref: number
   title: string
   description: string | null
   status: TicketStatus
@@ -81,7 +116,11 @@ export interface TicketListRow {
 }
 
 export interface Ticket {
+  /** Id global (únic a tota la base de dades): és el que fan servir els camins
+   * de Storage i les taules que hi pengen. El número que es mostra és `ref`. */
   id: number
+  project_id: number
+  ref: number
   title: string
   description: string | null
   status: TicketStatus
