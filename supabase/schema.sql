@@ -420,6 +420,19 @@ language sql stable security definer set search_path = public as $$
       or public.is_global_team_member('propietaris');
 $$;
 
+-- Pot tocar ALGUNA casella d'aprovació o de revisió de la fitxa: qui la té
+-- assignada (responsable), l'equip global de tècnics, el de propietaris, o un
+-- admin. És el permís que obre l'UPDATE de la fila; quina columna concreta pot
+-- canviar cadascú ho decideix el trigger guard_ticket_approvals.
+create or replace function public.can_approve_ticket(p_ticket_id bigint)
+returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_admin()
+      or public.is_assigned_to_ticket(p_ticket_id)
+      or public.is_global_team_member('tecnics')
+      or public.is_global_team_member('propietaris');
+$$;
+
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
 begin
@@ -457,12 +470,33 @@ begin
           select 1 from public.team_members
           where team_id = old.assignee_team_id and user_id = auth.uid()));
 
+  -- La policy tickets_update deixa entrar aquí qui només pot aprovar (l'RLS no
+  -- sap de columnes), així que els camps de contingut els tanca el trigger:
+  -- tocar-los només ho pot fer qui pot editar la fitxa.
+  if not public.can_edit_ticket(old.id) and (
+       new.title            is distinct from old.title
+    or new.description      is distinct from old.description
+    or new.zone_id          is distinct from old.zone_id
+    or new.work_type_id     is distinct from old.work_type_id
+    or new.agreed_solution  is distinct from old.agreed_solution
+    or new.due_date         is distinct from old.due_date
+    or new.assignee_id      is distinct from old.assignee_id
+    or new.assignee_team_id is distinct from old.assignee_team_id
+    or new.created_by       is distinct from old.created_by
+  ) then
+    raise exception 'No tens permís per editar aquesta fitxa';
+  end if;
+
   if new.approved_responsable_at is distinct from old.approved_responsable_at then
     if not responsable then
       raise exception 'Només qui té la fitxa assignada (o un admin) pot canviar aquesta aprovació';
     end if;
     new.approved_responsable_by :=
       case when new.approved_responsable_at is null then null else auth.uid() end;
+  else
+    -- Si la casella no s'ha mogut, l'atribució tampoc: no es pot reescriure
+    -- qui l'havia marcat.
+    new.approved_responsable_by := old.approved_responsable_by;
   end if;
 
   if new.approved_tecnics_at is distinct from old.approved_tecnics_at then
@@ -472,6 +506,8 @@ begin
     end if;
     new.approved_tecnics_by :=
       case when new.approved_tecnics_at is null then null else auth.uid() end;
+  else
+    new.approved_tecnics_by := old.approved_tecnics_by;
   end if;
 
   if new.approved_propietari_at is distinct from old.approved_propietari_at then
@@ -481,6 +517,8 @@ begin
     end if;
     new.approved_propietari_by :=
       case when new.approved_propietari_at is null then null else auth.uid() end;
+  else
+    new.approved_propietari_by := old.approved_propietari_by;
   end if;
 
   -- Peticions de revisió: les demana l'actor mateix; les pot retirar ell o el
@@ -492,6 +530,8 @@ begin
     end if;
     new.review_tecnics_by :=
       case when new.review_tecnics_at is null then null else auth.uid() end;
+  else
+    new.review_tecnics_by := old.review_tecnics_by;
   end if;
 
   if new.review_propietari_at is distinct from old.review_propietari_at then
@@ -501,6 +541,8 @@ begin
     end if;
     new.review_propietari_by :=
       case when new.review_propietari_at is null then null else auth.uid() end;
+  else
+    new.review_propietari_by := old.review_propietari_by;
   end if;
 
   return new;
@@ -648,9 +690,16 @@ create policy tickets_select on public.tickets
   for select to authenticated using (public.can_comment_ticket(id));
 create policy tickets_insert on public.tickets
   for insert to authenticated with check (public.can_create());
+-- Ull: aquesta policy és la porta de la FILA, i l'RLS no distingeix columnes.
+-- Per això deixa passar tant qui pot editar la fitxa com qui només hi pot
+-- aprovar: si no, l'UPDATE d'una aprovació feta per un responsable que no és
+-- l'autor de la fitxa no afectaria cap fila i fallaria en silenci. Els límits
+-- per columna els posen els triggers (guard_ticket_approvals per a les
+-- aprovacions, i el bloqueig dels camps de contingut de més amunt).
 create policy tickets_update on public.tickets
   for update to authenticated
-  using (public.can_edit_ticket(id)) with check (public.can_edit_ticket(id));
+  using (public.can_edit_ticket(id) or public.can_approve_ticket(id))
+  with check (public.can_edit_ticket(id) or public.can_approve_ticket(id));
 create policy tickets_delete on public.tickets
   for delete to authenticated using (public.is_admin());
 

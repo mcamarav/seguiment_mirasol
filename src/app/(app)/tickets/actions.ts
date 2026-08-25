@@ -63,6 +63,29 @@ async function loadTeamContext(supabase: SupabaseClient<any>, profile: Profile) 
   return buildTeamContext(toTeamsWithMembers(data ?? []), profile.id)
 }
 
+/** Aplica un canvi d'aprovació/revisió i comprova que hi hagi arribat.
+ *
+ * Amb `count` sabem quantes files ha tocat l'UPDATE: si l'RLS filtra la fila,
+ * Postgres no dóna cap error i el botó semblaria funcionar sense fer res. */
+async function updateApproval(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any>,
+  ticketId: number,
+  values: Record<string, string | null>,
+): Promise<FormState> {
+  const { error, count } = await supabase
+    .from('tickets')
+    .update(values, { count: 'exact' })
+    .eq('id', ticketId)
+
+  if (error) return { error: error.message }
+  if (count === 0) return { error: 'No s’ha pogut desar el canvi: no tens permís sobre aquesta fitxa.' }
+
+  revalidatePath('/')
+  revalidatePath(`/tickets/${ticketId}`)
+  return { ok: true }
+}
+
 async function loadTicket(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: SupabaseClient<any>,
@@ -174,20 +197,11 @@ export async function setApproval(
     return { error: 'No tens permís per canviar aquesta aprovació.' }
   }
 
-  const { error } = await supabase
-    .from('tickets')
-    .update({
-      [APPROVAL_COLUMN[actor]]: approve ? new Date().toISOString() : null,
-      ...(actor === 'responsable' && !approve ? NO_REVIEWS : {}),
-      ...(actor !== 'responsable' && approve ? { [REVIEW_COLUMN[actor]]: null } : {}),
-    })
-    .eq('id', ticketId)
-
-  if (error) return { error: error.message }
-
-  revalidatePath('/')
-  revalidatePath(`/tickets/${ticketId}`)
-  return { ok: true }
+  return updateApproval(supabase, ticketId, {
+    [APPROVAL_COLUMN[actor]]: approve ? new Date().toISOString() : null,
+    ...(actor === 'responsable' && !approve ? NO_REVIEWS : {}),
+    ...(actor !== 'responsable' && approve ? { [REVIEW_COLUMN[actor]]: null } : {}),
+  })
 }
 
 /** El tècnic o el propietari demanen (o desfan) la revisió de la feina: la
@@ -212,19 +226,10 @@ export async function setReview(
     return { error: 'Només es pot demanar revisió quan el responsable ha marcat la feina com a feta.' }
   }
 
-  const { error } = await supabase
-    .from('tickets')
-    .update({
-      [REVIEW_COLUMN[actor]]: request ? new Date().toISOString() : null,
-      ...(request ? { [APPROVAL_COLUMN[actor]]: null } : {}),
-    })
-    .eq('id', ticketId)
-
-  if (error) return { error: error.message }
-
-  revalidatePath('/')
-  revalidatePath(`/tickets/${ticketId}`)
-  return { ok: true }
+  return updateApproval(supabase, ticketId, {
+    [REVIEW_COLUMN[actor]]: request ? new Date().toISOString() : null,
+    ...(request ? { [APPROVAL_COLUMN[actor]]: null } : {}),
+  })
 }
 
 /** El responsable torna a marcar com a feta una fitxa «A revisar»: es retiren
@@ -246,21 +251,12 @@ export async function markReviewed(ticketId: number): Promise<FormState> {
     return { error: 'Aquesta fitxa no està pendent de revisió.' }
   }
 
-  const { error } = await supabase
-    .from('tickets')
-    .update({
-      approved_responsable_at: new Date().toISOString(),
-      approved_tecnics_at: null,
-      approved_propietari_at: null,
-      ...NO_REVIEWS,
-    })
-    .eq('id', ticketId)
-
-  if (error) return { error: error.message }
-
-  revalidatePath('/')
-  revalidatePath(`/tickets/${ticketId}`)
-  return { ok: true }
+  return updateApproval(supabase, ticketId, {
+    approved_responsable_at: new Date().toISOString(),
+    approved_tecnics_at: null,
+    approved_propietari_at: null,
+    ...NO_REVIEWS,
+  })
 }
 
 export async function createComment(
