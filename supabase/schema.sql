@@ -674,6 +674,10 @@ begin
     end if;
     new.approved_responsable_by :=
       case when new.approved_responsable_at is null then null else auth.uid() end;
+  else
+    -- Si la casella no s'ha mogut, l'atribució tampoc: no es pot reescriure
+    -- qui l'havia marcat.
+    new.approved_responsable_by := old.approved_responsable_by;
   end if;
 
   if new.approved_tecnics_at is distinct from old.approved_tecnics_at then
@@ -683,6 +687,8 @@ begin
     end if;
     new.approved_tecnics_by :=
       case when new.approved_tecnics_at is null then null else auth.uid() end;
+  else
+    new.approved_tecnics_by := old.approved_tecnics_by;
   end if;
 
   if new.approved_propietari_at is distinct from old.approved_propietari_at then
@@ -692,6 +698,8 @@ begin
     end if;
     new.approved_propietari_by :=
       case when new.approved_propietari_at is null then null else auth.uid() end;
+  else
+    new.approved_propietari_by := old.approved_propietari_by;
   end if;
 
   -- Peticions de revisió: les demana l'actor mateix; les pot retirar ell o el
@@ -703,6 +711,8 @@ begin
     end if;
     new.review_tecnics_by :=
       case when new.review_tecnics_at is null then null else auth.uid() end;
+  else
+    new.review_tecnics_by := old.review_tecnics_by;
   end if;
 
   if new.review_propietari_at is distinct from old.review_propietari_at then
@@ -712,6 +722,8 @@ begin
     end if;
     new.review_propietari_by :=
       case when new.review_propietari_at is null then null else auth.uid() end;
+  else
+    new.review_propietari_by := old.review_propietari_by;
   end if;
 
   return new;

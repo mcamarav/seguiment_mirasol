@@ -103,6 +103,25 @@ async function loadTicketContext(
   return context ? { ticket, context } : null
 }
 
+/** Aplica un canvi d'aprovació/revisió i comprova que hi hagi arribat.
+ *
+ * Amb `count` sabem quantes files ha tocat l'UPDATE: si l'RLS filtra la fila,
+ * Postgres no dóna cap error i el botó semblaria funcionar sense fer res. */
+async function updateApproval(
+  ticketId: number,
+  values: Record<string, string | null>,
+): Promise<FormState> {
+  const supabase = await createClient()
+  const { error, count } = await supabase
+    .from('tickets')
+    .update(values, { count: 'exact' })
+    .eq('id', ticketId)
+
+  if (error) return { error: error.message }
+  if (count === 0) return { error: 'No s’ha pogut desar el canvi: no tens permís sobre aquesta fitxa.' }
+  return { ok: true }
+}
+
 function revalidateTicket(slug: string, ref: number): void {
   revalidatePath(projectPath(slug))
   revalidatePath(projectPath(slug, `/tickets/${ref}`))
@@ -189,17 +208,12 @@ export async function setApproval(
     return { error: 'No tens permís per canviar aquesta aprovació.' }
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('tickets')
-    .update({
-      [APPROVAL_COLUMN[actor]]: approve ? new Date().toISOString() : null,
-      ...(actor === 'responsable' && !approve ? NO_REVIEWS : {}),
-      ...(actor !== 'responsable' && approve ? { [REVIEW_COLUMN[actor]]: null } : {}),
-    })
-    .eq('id', ticketId)
-
-  if (error) return { error: error.message }
+  const result = await updateApproval(ticketId, {
+    [APPROVAL_COLUMN[actor]]: approve ? new Date().toISOString() : null,
+    ...(actor === 'responsable' && !approve ? NO_REVIEWS : {}),
+    ...(actor !== 'responsable' && approve ? { [REVIEW_COLUMN[actor]]: null } : {}),
+  })
+  if (result.error) return result
 
   revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
@@ -223,16 +237,11 @@ export async function setReview(
     return { error: 'Només es pot demanar revisió quan el responsable ha marcat la feina com a feta.' }
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('tickets')
-    .update({
-      [REVIEW_COLUMN[actor]]: request ? new Date().toISOString() : null,
-      ...(request ? { [APPROVAL_COLUMN[actor]]: null } : {}),
-    })
-    .eq('id', ticketId)
-
-  if (error) return { error: error.message }
+  const result = await updateApproval(ticketId, {
+    [REVIEW_COLUMN[actor]]: request ? new Date().toISOString() : null,
+    ...(request ? { [APPROVAL_COLUMN[actor]]: null } : {}),
+  })
+  if (result.error) return result
 
   revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
@@ -253,18 +262,13 @@ export async function markReviewed(ticketId: number): Promise<FormState> {
     return { error: 'Aquesta fitxa no està pendent de revisió.' }
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('tickets')
-    .update({
-      approved_responsable_at: new Date().toISOString(),
-      approved_tecnics_at: null,
-      approved_propietari_at: null,
-      ...NO_REVIEWS,
-    })
-    .eq('id', ticketId)
-
-  if (error) return { error: error.message }
+  const result = await updateApproval(ticketId, {
+    approved_responsable_at: new Date().toISOString(),
+    approved_tecnics_at: null,
+    approved_propietari_at: null,
+    ...NO_REVIEWS,
+  })
+  if (result.error) return result
 
   revalidateTicket(context.project.slug, ticket.ref)
   return { ok: true }
