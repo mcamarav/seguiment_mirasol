@@ -78,6 +78,7 @@ export interface TicketListRow {
   created_at: string
   updated_at: string
   comment_count: number
+  zone_sort_order: number | null
 }
 
 export interface Ticket {

@@ -775,7 +775,8 @@ select
   tm.name     as assignee_team_name,
   t.created_at,
   t.updated_at,
-  (select count(*) from public.comments c where c.ticket_id = t.id) as comment_count
+  (select count(*) from public.comments c where c.ticket_id = t.id) as comment_count,
+  z.sort_order as zone_sort_order
 from public.tickets t
 left join public.zones      z  on z.id  = t.zone_id
 left join public.work_types wt on wt.id = t.work_type_id

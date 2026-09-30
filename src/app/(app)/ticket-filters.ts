@@ -32,8 +32,17 @@ export type SortKey =
   | 'due_desc'
   | 'resolved_desc'
   | 'title_asc'
+  | 'zone_asc'
 
-export const SORT_OPTIONS: { key: SortKey; label: string; column: string; ascending: boolean }[] = [
+/** `then` desempata, per ordre, dins del mateix valor de `column` (per exemple,
+ * dins d'una mateixa zona, les modificades fa menys primer). */
+export const SORT_OPTIONS: {
+  key: SortKey
+  label: string
+  column: string
+  ascending: boolean
+  then?: { column: string; ascending: boolean }[]
+}[] = [
   { key: 'updated_desc', label: 'Modificació ↓', column: 'updated_at', ascending: false },
   { key: 'created_desc', label: 'Publicació ↓', column: 'created_at', ascending: false },
   { key: 'created_asc', label: 'Publicació ↑', column: 'created_at', ascending: true },
@@ -41,6 +50,19 @@ export const SORT_OPTIONS: { key: SortKey; label: string; column: string; ascend
   { key: 'due_desc', label: 'Data prevista ↓', column: 'due_date', ascending: false },
   { key: 'resolved_desc', label: 'Resolució ↓', column: 'resolved_at', ascending: false },
   { key: 'title_asc', label: 'Nom (A-Z)', column: 'title', ascending: true },
+  // Per l'ordre de les zones del catàleg (el recorregut per la casa), no per
+  // nom; el nom només desempata zones amb el mateix ordre, perquè no quedin
+  // barrejades. Les fitxes sense zona van al final.
+  {
+    key: 'zone_asc',
+    label: 'Zona',
+    column: 'zone_sort_order',
+    ascending: true,
+    then: [
+      { column: 'zone_name', ascending: true },
+      { column: 'updated_at', ascending: false },
+    ],
+  },
 ]
 
 export interface TicketFilters {
@@ -123,6 +145,9 @@ export function ticketListQuery(supabase: SupabaseClient<any>, f: TicketFilters)
     .from('ticket_list')
     .select('*')
     .order(sort.column, { ascending: sort.ascending, nullsFirst: false })
+  for (const t of sort.then ?? []) {
+    query = query.order(t.column, { ascending: t.ascending, nullsFirst: false })
+  }
 
   // L'estat de la base de dades no serveix tal qual: «obert» i
   // «solucio_acordada» tant poden ser pendents com per validar, i el que ho
